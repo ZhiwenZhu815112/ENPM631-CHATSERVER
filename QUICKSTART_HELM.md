@@ -5,7 +5,7 @@
 This guide will get the application running in **5 minutes**.
 
 ### Prerequisites
-- Kubernetes cluster (Minikube or Docker Desktop with Kubernetes enabled)
+- Kubernetes cluster (Docker Desktop with Kubernetes enabled)
 - kubectl installed
 - Helm 3.x installed
 - Docker installed
@@ -26,14 +26,10 @@ minikube start --cpus=4 --memory=4096
 docker build -t chat-server:latest .
 docker build -t chat-autoscaler:latest -f Dockerfile.autoscaler .
 
-# 4. Load images (Minikube only, skip for Docker Desktop)
-minikube image load chat-server:latest
-minikube image load chat-autoscaler:latest
-
-# 5. Deploy with Helm
+# 4. Deploy with Helm
 helm install my-chat ./helm-chart/chat-app
 
-# 6. Wait for pods (2-3 minutes)
+# 5. Wait for pods (2-3 minutes)
 kubectl wait --for=condition=ready pod --all -n chat-app --timeout=300s
 
 # ✅ Done!
@@ -137,7 +133,6 @@ watch kubectl get pods -n chat-app -l app=chat-server
 [22:00:10] Users: 4 | Current: 1 Pods | Desired: 2 Pods | ↗️  SCALING UP
 ✅ Scaled deployment to 2 replicas
 ```
-
 ---
 
 ## 🧹 Cleanup
@@ -148,66 +143,10 @@ helm uninstall my-chat
 
 # Delete namespace
 kubectl delete namespace chat-app
-
-# Stop Minikube (if using)
-minikube stop
-```
-
----
-
-## 🔧 Troubleshooting
-
-### Pods not starting?
-
-```bash
-# Check pod status
-kubectl get pods -n chat-app
-
-# Describe problematic pod
-kubectl describe pod <pod-name> -n chat-app
-
-# Check logs
-kubectl logs <pod-name> -n chat-app
-```
-
-**Common issue:** Images not loaded (Minikube)
-```bash
-minikube image load chat-server:latest
-minikube image load chat-autoscaler:latest
-```
-
-### Can't connect to server?
-
-```bash
-# For Minikube, get IP
-minikube ip
-
-# Or use port-forward
-kubectl port-forward svc/chat-service -n chat-app 8080:8080
-python3 chat_client.py localhost 8080
-```
-
-### Autoscaler not working?
-
-```bash
-# Check autoscaler logs
-kubectl logs deployment/chat-autoscaler -n chat-app
-
-# Check online users in Redis
-kubectl exec -it deployment/redis -n chat-app -- redis-cli SCARD online_users
-
-# Check RBAC permissions
-kubectl describe role chat-autoscaler-role -n chat-app
-```
-
 ---
 
 ## 📚 More Information
 
 - Full deployment guide: `HELM_DEPLOYMENT.md`
 - Project README: `README.md`
-- Bug fixes and testing: `BUGFIXES_AND_TESTING.md`
-
 ---
-
-**Ready to start? Run the commands in the "One-Command Deployment" section! 🚀**
