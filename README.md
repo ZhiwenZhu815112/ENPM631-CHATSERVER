@@ -16,14 +16,14 @@ minikube start --cpus=4 --memory=4096
 docker build -t chat-server:latest .
 docker build -t chat-autoscaler:latest -f Dockerfile.autoscaler .
 
-# Deploy with Helm
+# Deploy with Helms
 helm install my-chat ./helm-chart/chat-app
 
 # Wait for pods to be ready
 kubectl wait --for=condition=ready pod --all -n chat-app --timeout=300s
 
 # Connect client
-python3 chat_client.py $(minikube ip) 30080
+python3 chat_client.py localhost 30080
 ```
 
 See [QUICKSTART_HELM.md](QUICKSTART_HELM.md) for complete instructions.
