@@ -4,4 +4,6 @@ metadata:
   name: {{ .Values.namespace }}
   labels:
     name: {{ .Values.namespace }}
-    {{- include "chat-app.labels" . | nindent 4 }}
+    helm.sh/chart: chat-app-1.0.0
+    app.kubernetes.io/name: chat-app
+    app.kubernetes.io/managed-by: Helm

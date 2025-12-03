@@ -4,7 +4,9 @@ metadata:
   name: chat-service
   namespace: {{ .Values.namespace }}
   labels:
-    {{- include "chat-app.labels" . | nindent 4 }}
+    helm.sh/chart: chat-app-1.0.0
+    app.kubernetes.io/name: chat-app
+    app.kubernetes.io/managed-by: Helm
     app: chat-server
 spec:
   selector:
@@ -22,7 +24,9 @@ metadata:
   name: chat-server
   namespace: {{ .Values.namespace }}
   labels:
-    {{- include "chat-app.labels" . | nindent 4 }}
+    helm.sh/chart: chat-app-1.0.0
+    app.kubernetes.io/name: chat-app
+    app.kubernetes.io/managed-by: Helm
     app: chat-server
 spec:
   {{- if not .Values.autoscaler.enabled }}

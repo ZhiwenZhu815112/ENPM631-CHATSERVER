@@ -96,10 +96,10 @@ redis:
 
   auth:
     enabled: false
-    password: ""  # Set if you want Redis authentication
+    password: ""  
 
   persistence:
-    enabled: false  # Enable if you want Redis data persistence
+    enabled: false  
     size: 1Gi
 
   resources:
@@ -129,7 +129,7 @@ autoscaler:
   maxReplicas: 10
   usersPerPod: 3  # Scale 1 Pod per 3 users
   checkInterval: 10  # Check every 10 seconds
-  scaleDownDelay: 60  # Wait 60 seconds before scaling down
+  scaleDownDelay: 30  # Wait 30 seconds before scaling down
 
   resources:
     requests:
