@@ -13,8 +13,8 @@ keywords:
   - postgresql
 maintainers:
   - name: Zhiwen Zhu
-    email: student@umd.edu
+    email: zzw@umd.edu
 sources:
-  - https://github.com/your-repo/chat-app
-home: https://github.com/your-repo/chat-app
+  - https://github.com/ZhiwenZhu815112/ENPM631-CHATSERVER
+home: https://github.com/ZhiwenZhu815112/ENPM631-CHATSERVER
 icon: https://raw.githubusercontent.com/kubernetes/kubernetes/master/logo/logo.png

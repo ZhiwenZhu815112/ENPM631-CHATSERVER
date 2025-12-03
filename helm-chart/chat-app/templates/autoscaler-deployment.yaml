@@ -79,11 +79,11 @@ spec:
         - name: MAX_REPLICAS
           value: "10"
         - name: USERS_PER_POD
-          value: "3"  # 每3个用户1个Pod
+          value: "3"  # every pod can handle 3 users
         - name: CHECK_INTERVAL
-          value: "10"  # 每10秒检查一次
+          value: "10"  # every 10 seconds check user count
         - name: SCALE_DOWN_DELAY
-          value: "60"  # 缩减前等待60秒
+          value: "60"  # after scaling up, wait 60 seconds before scaling down
         resources:
           requests:
             memory: "64Mi"
