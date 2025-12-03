@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir redis kubernetes
+
+# Copy autoscaler script
+COPY autoscaler.py .
+
+# Make it executable
+RUN chmod +x autoscaler.py
+
+# Run the autoscaler
+CMD ["python", "autoscaler.py"]

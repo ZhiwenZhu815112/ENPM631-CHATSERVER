@@ -1,0 +1,94 @@
+# ServiceAccount for Autoscaler
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chat-autoscaler
+  namespace: chat-app
+---
+# Role with permissions to read/update deployments
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chat-autoscaler-role
+  namespace: chat-app
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments", "deployments/scale"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+---
+# RoleBinding to grant permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chat-autoscaler-binding
+  namespace: chat-app
+subjects:
+- kind: ServiceAccount
+  name: chat-autoscaler
+  namespace: chat-app
+roleRef:
+  kind: Role
+  name: chat-autoscaler-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Autoscaler Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-autoscaler
+  namespace: chat-app
+  labels:
+    app: chat-autoscaler
+spec:
+  replicas: 1  # Only need 1 autoscaler instance
+  selector:
+    matchLabels:
+      app: chat-autoscaler
+  template:
+    metadata:
+      labels:
+        app: chat-autoscaler
+    spec:
+      serviceAccountName: chat-autoscaler
+      containers:
+      - name: autoscaler
+        image: chat-autoscaler:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: NAMESPACE
+          value: "chat-app"
+        - name: DEPLOYMENT_NAME
+          value: "chat-server"
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: chat-secret
+              key: REDIS_PASSWORD
+        - name: MIN_REPLICAS
+          value: "1"
+        - name: MAX_REPLICAS
+          value: "10"
+        - name: USERS_PER_POD
+          value: "3"  # 每3个用户1个Pod
+        - name: CHECK_INTERVAL
+          value: "10"  # 每10秒检查一次
+        - name: SCALE_DOWN_DELAY
+          value: "60"  # 缩减前等待60秒
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      restartPolicy: Always

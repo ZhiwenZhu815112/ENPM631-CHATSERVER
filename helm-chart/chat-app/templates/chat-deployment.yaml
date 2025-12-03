@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "chat-app.labels" . | nindent 4 }}
+    app: chat-server
+spec:
+  selector:
+    app: chat-server
+  ports:
+    - protocol: TCP
+      port: {{ .Values.chatServer.service.port }}
+      targetPort: 8080
+      nodePort: {{ .Values.chatServer.service.nodePort }}
+  type: {{ .Values.chatServer.service.type }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "chat-app.labels" . | nindent 4 }}
+    app: chat-server
+spec:
+  {{- if not .Values.autoscaler.enabled }}
+  replicas: {{ .Values.chatServer.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: chat-server
+  template:
+    metadata:
+      labels:
+        app: chat-server
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z postgres-service 5432; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+      - name: wait-for-redis
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z redis-service 6379; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+          echo "Redis is ready!"
+      containers:
+      - name: chat-server
+        image: "{{ .Values.chatServer.image.repository }}:{{ .Values.chatServer.image.tag }}"
+        imagePullPolicy: {{ .Values.chatServer.image.pullPolicy }}
+        ports:
+        - containerPort: 8080
+          name: chat
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: DB_USER
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: chat-secret
+              key: DB_PASS
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: chat-secret
+              key: REDIS_PASSWORD
+        - name: SERVER_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: chat-config
+              key: SERVER_PORT
+        {{- if .Values.chatServer.livenessProbe.enabled }}
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: {{ .Values.chatServer.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.chatServer.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.chatServer.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.chatServer.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.chatServer.readinessProbe.enabled }}
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: {{ .Values.chatServer.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.chatServer.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.chatServer.readinessProbe.timeoutSeconds }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.chatServer.resources | nindent 10 }}
+      restartPolicy: Always

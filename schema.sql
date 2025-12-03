@@ -1,0 +1,51 @@
+-- Database schema for chat application
+-- Run this to initialize the PostgreSQL database
+
+-- Users table: stores user credentials
+CREATE TABLE IF NOT EXISTS users (
+    user_id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Conversations table: tracks one-on-one conversations between users
+CREATE TABLE IF NOT EXISTS conversations (
+    conversation_id SERIAL PRIMARY KEY,
+    participant1_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+    participant2_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT different_participants CHECK (participant1_id < participant2_id),
+    CONSTRAINT unique_conversation UNIQUE (participant1_id, participant2_id)
+);
+
+-- Messages table: stores all chat messages (now tied to conversations)
+CREATE TABLE IF NOT EXISTS messages (
+    message_id SERIAL PRIMARY KEY,
+    conversation_id INTEGER REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+    sender_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+    sender_username VARCHAR(50) NOT NULL,
+    message_text TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_read BOOLEAN DEFAULT FALSE
+);
+
+-- Sessions table: tracks active user sessions (optional, for preventing duplicate logins)
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+    login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    logout_time TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Create indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_conversations_participant1 ON conversations(participant1_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_participant2 ON conversations(participant2_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_last_message ON conversations(last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);

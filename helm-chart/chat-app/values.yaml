@@ -1,0 +1,161 @@
+# Default values for chat-app
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings
+nameOverride: ""
+fullnameOverride: ""
+
+# Namespace settings
+namespace: chat-app
+
+# Chat Server Configuration
+chatServer:
+  replicaCount: 1  # Will be managed by autoscaler
+  image:
+    repository: chat-server
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  service:
+    type: NodePort
+    port: 8080
+    nodePort: 30080
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+  # Probes
+  livenessProbe:
+    enabled: true
+    tcpSocket:
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    tcpSocket:
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+
+# PostgreSQL Configuration
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15-alpine"
+
+  auth:
+    database: chatdb
+    username: chatuser
+    password: chatpass  # Change this in production!
+
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""  # Use default storage class
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Health check
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+
+# Redis Configuration
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+
+  auth:
+    enabled: false
+    password: ""  # Set if you want Redis authentication
+
+  persistence:
+    enabled: false  # Enable if you want Redis data persistence
+    size: 1Gi
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+  # Redis configuration
+  config:
+    appendonly: "yes"
+    maxmemory: "256mb"
+    maxmemory-policy: "allkeys-lru"
+
+# Autoscaler Configuration
+autoscaler:
+  enabled: true  # Set to false to disable autoscaling
+  image:
+    repository: chat-autoscaler
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  # Scaling parameters
+  minReplicas: 1
+  maxReplicas: 10
+  usersPerPod: 3  # Scale 1 Pod per 3 users
+  checkInterval: 10  # Check every 10 seconds
+  scaleDownDelay: 60  # Wait 60 seconds before scaling down
+
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "100m"
+
+# ConfigMap settings
+config:
+  server:
+    port: 8080
+
+# Secret settings (Base64 encoded in template)
+secrets:
+  postgresql:
+    password: chatpass  # Will be base64 encoded
+  redis:
+    password: ""  # Empty = no auth
+
+# RBAC settings
+rbac:
+  create: true
+
+# ServiceAccount settings
+serviceAccount:
+  create: true
+  name: ""
