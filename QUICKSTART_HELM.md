@@ -26,10 +26,20 @@ minikube start --cpus=4 --memory=4096
 docker build -t chat-server:latest .
 docker build -t chat-autoscaler:latest -f Dockerfile.autoscaler .
 
-# 4. Deploy with Helm
+# 4. Pull public images (Redis & PostgreSQL)
+docker pull redis:7-alpine
+docker pull postgres:15-alpine
+
+# 5. Load images (Minikube only, skip for Docker Desktop)
+minikube image load chat-server:latest
+minikube image load chat-autoscaler:latest
+minikube image load redis:7-alpine
+minikube image load postgres:15-alpine
+
+# 6. Deploy with Helm
 helm install my-chat ./helm-chart/chat-app
 
-# 5. Wait for pods (2-3 minutes)
+# 7. Wait for pods (2-3 minutes)
 kubectl wait --for=condition=ready pod --all -n chat-app --timeout=300s
 
 # ✅ Done!
@@ -143,6 +153,59 @@ helm uninstall my-chat
 
 # Delete namespace
 kubectl delete namespace chat-app
+---
+
+## 🔧 Troubleshooting
+
+### Redis/Postgres PullBackOff Error
+
+If you see Redis or Postgres pods in `ImagePullBackOff` status:
+
+```bash
+# Check pod status
+kubectl get pods -n chat-app
+
+# If you see:
+# redis-xxx        0/1     ImagePullBackOff
+# postgres-0       0/1     ImagePullBackOff
+```
+
+**Solution: Pull images manually before deploying**
+
+```bash
+# Pull public images
+docker pull redis:7-alpine
+docker pull postgres:15-alpine
+
+# For Minikube users, load into cluster
+minikube image load redis:7-alpine
+minikube image load postgres:15-alpine
+
+# Reinstall
+helm uninstall my-chat
+helm install my-chat ./helm-chart/chat-app
+```
+
+**Alternative: Use mirror registry (if Docker Hub is blocked)**
+
+Edit `helm-chart/chat-app/values.yaml`:
+
+```yaml
+redis:
+  image:
+    repository: dockerproxy.com/library/redis  # Mirror
+    tag: "7-alpine"
+
+postgresql:
+  image:
+    repository: dockerproxy.com/library/postgres  # Mirror
+    tag: "15-alpine"
+```
+
+### Other Common Issues
+
+See the troubleshooting section starting at line 158 in the original guide.
+
 ---
 
 ## 📚 More Information

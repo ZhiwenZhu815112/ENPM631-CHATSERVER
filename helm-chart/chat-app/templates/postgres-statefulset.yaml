@@ -30,7 +30,8 @@ spec:
     spec:
       containers:
       - name: postgres
-        image: postgres:15-alpine
+        image: {{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}
+        imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
         ports:
         - containerPort: 5432
           name: postgres
