@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: chat-service
-  namespace: {{ .Values.namespace }}
+  namespace: chat-app
   labels:
     helm.sh/chart: chat-app-1.0.0
     app.kubernetes.io/name: chat-app
@@ -13,25 +13,23 @@ spec:
     app: chat-server
   ports:
     - protocol: TCP
-      port: {{ .Values.chatServer.service.port }}
+      port: 8080
       targetPort: 8080
-      nodePort: {{ .Values.chatServer.service.nodePort }}
-  type: {{ .Values.chatServer.service.type }}
+      nodePort: 30080
+  type: NodePort
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chat-server
-  namespace: {{ .Values.namespace }}
+  namespace: chat-app
   labels:
     helm.sh/chart: chat-app-1.0.0
     app.kubernetes.io/name: chat-app
     app.kubernetes.io/managed-by: Helm
     app: chat-server
 spec:
-  {{- if not .Values.autoscaler.enabled }}
-  replicas: {{ .Values.chatServer.replicaCount }}
-  {{- end }}
+  # No replicas specified - managed by autoscaler
   selector:
     matchLabels:
       app: chat-server
@@ -65,8 +63,8 @@ spec:
           echo "Redis is ready!"
       containers:
       - name: chat-server
-        image: "{{ .Values.chatServer.image.repository }}:{{ .Values.chatServer.image.tag }}"
-        imagePullPolicy: {{ .Values.chatServer.image.pullPolicy }}
+        image: "chat-server:latest"
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
           name: chat
@@ -106,33 +104,32 @@ spec:
             configMapKeyRef:
               name: chat-config
               key: REDIS_PORT
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: chat-secret
-              key: REDIS_PASSWORD
         - name: SERVER_PORT
           valueFrom:
             configMapKeyRef:
               name: chat-config
               key: SERVER_PORT
-        {{- if .Values.chatServer.livenessProbe.enabled }}
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         livenessProbe:
           tcpSocket:
             port: 8080
-          initialDelaySeconds: {{ .Values.chatServer.livenessProbe.initialDelaySeconds }}
-          periodSeconds: {{ .Values.chatServer.livenessProbe.periodSeconds }}
-          timeoutSeconds: {{ .Values.chatServer.livenessProbe.timeoutSeconds }}
-          failureThreshold: {{ .Values.chatServer.livenessProbe.failureThreshold }}
-        {{- end }}
-        {{- if .Values.chatServer.readinessProbe.enabled }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           tcpSocket:
             port: 8080
-          initialDelaySeconds: {{ .Values.chatServer.readinessProbe.initialDelaySeconds }}
-          periodSeconds: {{ .Values.chatServer.readinessProbe.periodSeconds }}
-          timeoutSeconds: {{ .Values.chatServer.readinessProbe.timeoutSeconds }}
-        {{- end }}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
         resources:
-          {{- toYaml .Values.chatServer.resources | nindent 10 }}
-      restartPolicy: Always
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"

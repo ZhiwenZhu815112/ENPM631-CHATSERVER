@@ -1,11 +1,9 @@
-# ServiceAccount for Autoscaler
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: chat-autoscaler
   namespace: chat-app
 ---
-# Role with permissions to read/update deployments
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -16,7 +14,6 @@ rules:
   resources: ["deployments", "deployments/scale"]
   verbs: ["get", "list", "watch", "update", "patch"]
 ---
-# RoleBinding to grant permissions
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -31,16 +28,13 @@ roleRef:
   name: chat-autoscaler-role
   apiGroup: rbac.authorization.k8s.io
 ---
-# Autoscaler Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chat-autoscaler
   namespace: chat-app
-  labels:
-    app: chat-autoscaler
 spec:
-  replicas: 1  # Only need 1 autoscaler instance
+  replicas: 1
   selector:
     matchLabels:
       app: chat-autoscaler
@@ -60,30 +54,19 @@ spec:
         - name: DEPLOYMENT_NAME
           value: "chat-server"
         - name: REDIS_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: chat-config
-              key: REDIS_HOST
+          value: "redis-service.chat-app.svc.cluster.local"
         - name: REDIS_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: chat-config
-              key: REDIS_PORT
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: chat-secret
-              key: REDIS_PASSWORD
+          value: "6379"
         - name: MIN_REPLICAS
           value: "1"
         - name: MAX_REPLICAS
           value: "10"
         - name: USERS_PER_POD
-          value: "3"  # every pod can handle 3 users
+          value: "3"
         - name: CHECK_INTERVAL
-          value: "10"  # every 10 seconds check user count
+          value: "10"
         - name: SCALE_DOWN_DELAY
-          value: "60"  # after scaling up, wait 60 seconds before scaling down
+          value: "60"
         resources:
           requests:
             memory: "64Mi"
@@ -91,4 +74,3 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "100m"
-      restartPolicy: Always

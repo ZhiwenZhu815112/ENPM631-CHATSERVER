@@ -29,8 +29,8 @@ spec:
     spec:
       containers:
       - name: redis
-        image: {{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}
-        imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+        image: redis:7-alpine
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 6379
           name: redis
