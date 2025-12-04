@@ -47,8 +47,8 @@ class RedisManager:
                 data.update(user_info)
 
             self.redis_client.set(key, json.dumps(data))
-            # Set expiry to 5 minutes (will be refreshed by heartbeat)
-            self.redis_client.expire(key, 300)
+            # Set expiry to 30 minutes (auto-cleanup for disconnected users)
+            self.redis_client.expire(key, 1800)
 
             # Also add to online users set for quick lookup
             self.redis_client.sadd("online_users", username)
@@ -146,7 +146,7 @@ class RedisManager:
         try:
             key = f"online_user:{username}"
             if self.redis_client.exists(key):
-                self.redis_client.expire(key, 300)  # Extend for another 5 minutes
+                self.redis_client.expire(key, 1800)  # Extend for another 30 minutes
                 return True
             return False
         except Exception as e:
