@@ -353,6 +353,65 @@ class DatabaseManager:
             if conn:
                 self.return_connection(conn)
 
+    def save_broadcast_message(self, sender_id, sender_username, message_text):
+        """Save a broadcast message"""
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Insert broadcast message
+            cursor.execute(
+                """
+                INSERT INTO broadcast_messages (sender_id, sender_username, message_text)
+                VALUES (%s, %s, %s)
+                """,
+                (sender_id, sender_username, message_text)
+            )
+
+            conn.commit()
+            cursor.close()
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            print(f"Error saving broadcast message: {e}")
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def get_broadcast_messages(self, limit=50):
+        """
+        Retrieve recent broadcast messages
+        Returns: list of (sender_username, message_text, timestamp)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT sender_username, message_text, timestamp
+                FROM broadcast_messages
+                ORDER BY timestamp DESC
+                LIMIT %s
+                """,
+                (limit,)
+            )
+            messages = cursor.fetchall()
+            cursor.close()
+
+            # Reverse to show oldest first
+            return list(reversed(messages))
+
+        except Exception as e:
+            print(f"Error retrieving broadcast messages: {e}")
+            return []
+        finally:
+            if conn:
+                self.return_connection(conn)
+
     def close_all_connections(self):
         """Close all connections in the pool"""
         if self.connection_pool:

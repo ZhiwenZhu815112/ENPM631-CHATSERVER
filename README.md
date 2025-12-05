@@ -34,6 +34,7 @@ See [QUICKSTART_HELM.md](QUICKSTART_HELM.md) for complete instructions.
 - ⭐ **Helm Chart** - One-command deployment
 - 🔐 **User Authentication** - Login and signup with password hashing
 - 💬 **Private Messaging** - One-on-one conversations
+- 📢 **Broadcast Channel** - Send messages to all users via dedicated broadcast channel
 - 📊 **Kubernetes Horizontal Scaling** - Automatically scales from 1 to 10 pods
 - 💾 **PostgreSQL + Redis** - Persistent storage and distributed state
 - 🔄 **Real-time Notifications** - Instant message delivery
@@ -45,6 +46,7 @@ See [QUICKSTART_HELM.md](QUICKSTART_HELM.md) for complete instructions.
 
 - **User Authentication**: Login and signup system with password hashing
 - **Private Messaging**: One-on-one conversations with real-time delivery
+- **Broadcast Channel**: Send messages to all users via dedicated broadcast channel with message history
 - **Chat History**: View last 50 messages when logging in
 - **Persistent Storage**: All messages stored in PostgreSQL database
 - **Multi-threaded**: Supports multiple concurrent users
@@ -113,7 +115,10 @@ chatp/
 
 ### Commands
 
-- Type any message to broadcast to all users
-- Type `bye` to disconnect
+- Select `BROADCAST` to join the broadcast channel and send messages to all users
+- Type any message in a private conversation to send to that specific user
+- Type any message in the broadcast channel to send to all online users
+- Type `back` to return to the contact list
+- Type `bye` at the contact selection to disconnect
 
 ---

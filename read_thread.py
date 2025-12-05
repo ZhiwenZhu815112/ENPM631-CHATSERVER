@@ -84,14 +84,22 @@ class ReadThread(threading.Thread):
 
             # Handle incoming messages while waiting (before contact list)
             incoming_sender = None
-            while response.startswith("MESSAGE:"):
-                # Incoming message: MESSAGE:sender:text
-                parts = response.split(":", 2)
-                if len(parts) == 3:
-                    sender = parts[1]
-                    text = parts[2]
-                    print(f"\n💬 {sender}: {text}")
-                    incoming_sender = sender  # Remember the sender
+            while response.startswith("MESSAGE:") or response.startswith("BROADCAST:"):
+                if response.startswith("MESSAGE:"):
+                    # Incoming message: MESSAGE:sender:text
+                    parts = response.split(":", 2)
+                    if len(parts) == 3:
+                        sender = parts[1]
+                        text = parts[2]
+                        print(f"\n💬 {sender}: {text}")
+                        incoming_sender = sender  # Remember the sender
+                elif response.startswith("BROADCAST:"):
+                    # Incoming broadcast: BROADCAST:sender:text
+                    parts = response.split(":", 3)
+                    if len(parts) >= 3:
+                        sender = parts[1]
+                        text = parts[2]
+                        print(f"\n📢 [BROADCAST] {sender}: {text}")
                 # Read next line
                 response = self.reader.readline().strip()
                 if not response:  # Check for disconnection
@@ -124,8 +132,11 @@ class ReadThread(threading.Thread):
                 # Parse contact: username|status
                 if "|" in line:
                     username, status = line.split("|", 1)
-                    status_symbol = "🟢" if status == "online" else "⚪"
-                    print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
+                    if username == "BROADCAST":
+                        print(f"{len(contacts) + 1}. 📢 BROADCAST CHANNEL")
+                    else:
+                        status_symbol = "🟢" if status == "online" else "⚪"
+                        print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
                     contacts.append(username)
 
             print("="*60)
@@ -165,14 +176,23 @@ class ReadThread(threading.Thread):
             response = response.strip()
 
             # Collect all pending incoming messages
-            while response.startswith("MESSAGE:"):
-                parts = response.split(":", 2)
-                if len(parts) == 3:
-                    sender = parts[1]
-                    message_text = parts[2]
-                    pending_messages.append((sender, message_text))
-                    print(f"\n💬 New message from {sender}: {message_text}")
-                    print(f"    Type '{sender}' to reply!")
+            while response.startswith("MESSAGE:") or response.startswith("BROADCAST:"):
+                if response.startswith("MESSAGE:"):
+                    parts = response.split(":", 2)
+                    if len(parts) == 3:
+                        sender = parts[1]
+                        message_text = parts[2]
+                        pending_messages.append((sender, message_text))
+                        print(f"\n💬 New message from {sender}: {message_text}")
+                        print(f"    Type '{sender}' to reply!")
+                elif response.startswith("BROADCAST:"):
+                    parts = response.split(":", 3)
+                    if len(parts) >= 3:
+                        sender = parts[1]
+                        message_text = parts[2]
+                        pending_messages.append((f"[BROADCAST] {sender}", message_text))
+                        print(f"\n📢 New broadcast from {sender}: {message_text}")
+                        print(f"    Type 'BROADCAST' to join the channel!")
 
                 # Read next line
                 response = self.reader.readline()
@@ -199,8 +219,11 @@ class ReadThread(threading.Thread):
                         break
                     if "|" in line:
                         username, status = line.split("|", 1)
-                        status_symbol = "🟢" if status == "online" else "⚪"
-                        print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
+                        if username == "BROADCAST":
+                            print(f"{len(contacts) + 1}. 📢 BROADCAST CHANNEL")
+                        else:
+                            status_symbol = "🟢" if status == "online" else "⚪"
+                            print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
                         contacts.append(username)
 
                 print("="*60)
@@ -224,17 +247,23 @@ class ReadThread(threading.Thread):
                 print("\n❌ Error creating conversation. Please try again.")
                 return True
 
-            if not response.startswith("CONVERSATION_START"):
+            if not response.startswith("CONVERSATION_START") and not response.startswith("BROADCAST_START"):
                 print(f"Unexpected response: {response}")
                 return False
 
-            # Extract contact name
-            contact_name = response.split(":", 1)[1] if ":" in response else "Unknown"
+            # Extract contact name or broadcast channel
+            if response.startswith("BROADCAST_START"):
+                contact_name = "BROADCAST CHANNEL"
+                header = "📢 BROADCAST CHANNEL"
+            else:
+                contact_name = response.split(":", 1)[1] if ":" in response else "Unknown"
+                header = f"CONVERSATION WITH {contact_name}"
+            
             self.client.set_current_contact(contact_name)
 
             # Display conversation header
             print("\n" + "="*60)
-            print(f"  CONVERSATION WITH {contact_name}")
+            print(f"  {header}")
             print("="*60)
 
             # Display conversation history
@@ -270,9 +299,24 @@ class ReadThread(threading.Thread):
                         print(f"\n{sender}: {text}")
                         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
+                elif message.startswith("BROADCAST:"):
+                    # Incoming broadcast message: BROADCAST:sender:text
+                    parts = message.split(":", 3)
+                    if len(parts) >= 3:
+                        sender = parts[1]
+                        text = parts[2]
+                        print(f"\n📢 {sender}: {text}")
+                        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
                 elif message.startswith("SENT:"):
                     # Confirmation that our message was sent
                     # Show prompt again so user can continue typing
+                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
+                elif message.startswith("BROADCAST_SENT:"):
+                    # Confirmation that our broadcast was sent
+                    status = message.split(":", 1)[1] if ":" in message else "Broadcast sent"
+                    print(f"\n✅ {status}")
                     print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
                 elif message == "CONTACT_LIST_START":

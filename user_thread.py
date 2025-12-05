@@ -36,19 +36,10 @@ class UserThread(threading.Thread):
 
             # Main contact selection and messaging loop
             while True:
-                # Send contact list
+                # Send contact list (always includes BROADCAST)
                 contact_list = self.send_contact_list()
 
-                # If no contacts exist, send special message but keep connection alive
-                if not contact_list:
-                    self.writer.write("NO_CONTACTS:No other users registered yet. Type 'bye' to exit or press Enter to refresh.\n")
-                    self.writer.flush()
-                    # Wait for input (either 'bye' or just enter to refresh)
-                    user_input = input_stream.readline().strip()
-                    if user_input == "bye":
-                        break
-                    else:
-                        continue  # Refresh contact list
+                # Contact list always has at least BROADCAST, so we no longer need NO_CONTACTS handling
 
                 # Wait for contact selection
                 selected_contact = input_stream.readline().strip()
@@ -58,6 +49,10 @@ class UserThread(threading.Thread):
                     break
                 elif not selected_contact:
                     # Empty input = refresh contact list
+                    continue
+                elif selected_contact == "BROADCAST":
+                    # Handle broadcast messaging
+                    self.handle_broadcast_chat(input_stream, user_name)
                     continue
 
                 # Note: Don't validate against cached contact_list - check database instead
@@ -182,27 +177,30 @@ class UserThread(threading.Thread):
 
     def send_contact_list(self):
         """
-        Send list of all users (contacts) to the client
+        Send list of all users (contacts) and broadcast option to the client
         Returns list of usernames (excluding current user)
         """
         all_users = self.db_manager.get_all_users(exclude_user_id=self.user_id)
-
-        if not all_users:
-            return []
 
         # Send contact list
         self.writer.write("CONTACT_LIST_START\n")
         self.writer.flush()
 
-        contact_usernames = []
-        online_usernames = self.server.get_online_usernames()
+        # Always include BROADCAST option as the first item
+        self.writer.write("BROADCAST|broadcast\n")
+        self.writer.flush()
 
-        for user_id, username, created_at in all_users:
-            is_online = username in online_usernames
-            status = "online" if is_online else "offline"
-            self.writer.write(f"{username}|{status}\n")
-            self.writer.flush()
-            contact_usernames.append(username)
+        contact_usernames = ["BROADCAST"]
+        
+        if all_users:
+            online_usernames = self.server.get_online_usernames()
+
+            for user_id, username, created_at in all_users:
+                is_online = username in online_usernames
+                status = "online" if is_online else "offline"
+                self.writer.write(f"{username}|{status}\n")
+                self.writer.flush()
+                contact_usernames.append(username)
 
         self.writer.write("CONTACT_LIST_END\n")
         self.writer.flush()
@@ -214,6 +212,54 @@ class UserThread(threading.Thread):
         messages = self.db_manager.get_conversation_messages(conversation_id, limit=50)
 
         self.writer.write(f"CONVERSATION_START:{contact_name}\n")
+        self.writer.flush()
+
+        if messages:
+            for sender_username, message_text, timestamp in messages:
+                formatted_msg = f"[{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {sender_username}: {message_text}"
+                self.writer.write(f"{formatted_msg}\n")
+                self.writer.flush()
+
+        self.writer.write("CONVERSATION_READY\n")
+        self.writer.flush()
+
+    def handle_broadcast_chat(self, input_stream, user_name):
+        """
+        Handle broadcast messaging mode
+        """
+        # Send broadcast history
+        self.send_broadcast_history()
+
+        while True:
+            client_message = input_stream.readline().strip()
+
+            # Check for exit command to return to contact list
+            if not client_message or client_message == "back":
+                return
+
+            # Save broadcast message to database
+            self.db_manager.save_broadcast_message(self.user_id, user_name, client_message)
+            import time 
+            timestamp = int(time.time()*1000)
+            # Send broadcast message to all online users except sender
+            online_users = self.server.get_online_usernames()
+            delivered_count = 0
+            
+            for recipient in online_users:
+                if recipient != user_name:  # Don't send to self
+                    if self.server.send_to_user(recipient, f"BROADCAST:{user_name}:{client_message}:{timestamp}"):
+                        delivered_count += 1
+
+            # Confirm to sender
+            total_users = len(online_users) - 1  # Exclude sender
+            self.writer.write(f"BROADCAST_SENT:Broadcast sent to {delivered_count} online users (of {total_users} total)\n")
+            self.writer.flush()
+
+    def send_broadcast_history(self):
+        """Send recent broadcast message history"""
+        messages = self.db_manager.get_broadcast_messages(limit=50)
+
+        self.writer.write("BROADCAST_START:BROADCAST CHANNEL\n")
         self.writer.flush()
 
         if messages:

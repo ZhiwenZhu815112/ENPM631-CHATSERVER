@@ -28,7 +28,17 @@ CREATE TABLE IF NOT EXISTS messages (
     sender_username VARCHAR(50) NOT NULL,
     message_text TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_read BOOLEAN DEFAULT FALSE
+    is_read BOOLEAN DEFAULT FALSE,
+    message_type VARCHAR(20) DEFAULT 'private'
+);
+
+-- Broadcast messages table: stores broadcast messages sent to all users
+CREATE TABLE IF NOT EXISTS broadcast_messages (
+    broadcast_id SERIAL PRIMARY KEY,
+    sender_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+    sender_username VARCHAR(50) NOT NULL,
+    message_text TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Sessions table: tracks active user sessions (optional, for preventing duplicate logins)
@@ -47,5 +57,8 @@ CREATE INDEX IF NOT EXISTS idx_conversations_last_message ON conversations(last_
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(message_type);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
+CREATE INDEX IF NOT EXISTS idx_broadcast_timestamp ON broadcast_messages(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_broadcast_sender ON broadcast_messages(sender_id);
