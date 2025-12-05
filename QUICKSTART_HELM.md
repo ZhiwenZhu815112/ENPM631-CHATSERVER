@@ -113,6 +113,19 @@ Username: david
 Password: test123
 ```
 
+### Test Broadcast Functionality
+
+**In any terminal:**
+```
+Select: BROADCAST
+Type: Hello everyone! This is a broadcast message.
+```
+
+All other users will see:
+```
+📢 [BROADCAST] alice: Hello everyone! This is a broadcast message.
+```
+
 ---
 
 ## 📈 Watch Autoscaling in Action
