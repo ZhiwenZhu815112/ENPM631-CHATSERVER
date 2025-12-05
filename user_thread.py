@@ -239,14 +239,15 @@ class UserThread(threading.Thread):
 
             # Save broadcast message to database
             self.db_manager.save_broadcast_message(self.user_id, user_name, client_message)
-
+            import time 
+            timestamp = int(time.time()*1000)
             # Send broadcast message to all online users except sender
             online_users = self.server.get_online_usernames()
             delivered_count = 0
             
             for recipient in online_users:
                 if recipient != user_name:  # Don't send to self
-                    if self.server.send_to_user(recipient, f"BROADCAST:{user_name}:{client_message}"):
+                    if self.server.send_to_user(recipient, f"BROADCAST:{user_name}:{client_message}:{timestamp}"):
                         delivered_count += 1
 
             # Confirm to sender

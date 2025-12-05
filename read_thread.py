@@ -95,8 +95,8 @@ class ReadThread(threading.Thread):
                         incoming_sender = sender  # Remember the sender
                 elif response.startswith("BROADCAST:"):
                     # Incoming broadcast: BROADCAST:sender:text
-                    parts = response.split(":", 2)
-                    if len(parts) == 3:
+                    parts = response.split(":", 3)
+                    if len(parts) >= 3:
                         sender = parts[1]
                         text = parts[2]
                         print(f"\n📢 [BROADCAST] {sender}: {text}")
@@ -186,8 +186,8 @@ class ReadThread(threading.Thread):
                         print(f"\n💬 New message from {sender}: {message_text}")
                         print(f"    Type '{sender}' to reply!")
                 elif response.startswith("BROADCAST:"):
-                    parts = response.split(":", 2)
-                    if len(parts) == 3:
+                    parts = response.split(":", 3)
+                    if len(parts) >= 3:
                         sender = parts[1]
                         message_text = parts[2]
                         pending_messages.append((f"[BROADCAST] {sender}", message_text))
@@ -301,8 +301,8 @@ class ReadThread(threading.Thread):
 
                 elif message.startswith("BROADCAST:"):
                     # Incoming broadcast message: BROADCAST:sender:text
-                    parts = message.split(":", 2)
-                    if len(parts) == 3:
+                    parts = message.split(":", 3)
+                    if len(parts) >= 3:
                         sender = parts[1]
                         text = parts[2]
                         print(f"\n📢 {sender}: {text}")
