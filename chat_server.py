@@ -187,7 +187,24 @@ class ChatServer:
     def get_db_manager(self):
         """Return the database manager instance"""
         return self.db_manager
-
+    
+    def send_to_group_members(self, group_member_usernames, message, exclude_username=None):
+        """
+        Send a message to multiple users (for group chat)
+        Args:
+            group_member_usernames: List of usernames to send to
+            message: Message content to send
+            exclude_username: Username to exclude (typically the sender)
+        Returns:
+            Number of users message was delivered to
+        """
+        delivered_count = 0
+        for username in group_member_usernames:
+            if exclude_username and username == exclude_username:
+                continue
+            if self.send_to_user(username, message):
+                delivered_count += 1
+        return delivered_count
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

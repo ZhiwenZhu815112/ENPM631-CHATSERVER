@@ -47,7 +47,7 @@ spec:
       containers:
       - name: autoscaler
         image: chat-autoscaler:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Never
         env:
         - name: NAMESPACE
           value: "chat-app"

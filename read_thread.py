@@ -8,7 +8,7 @@ to the console.
 It runs in an infinite loop until the client disconnects from the server.
 
 @author www.codejava.net (Java version)
-Python port with chat history display and authentication handling
+Python port with chat history display, authentication, and group chat UI
 """
 
 class ReadThread(threading.Thread):
@@ -18,7 +18,6 @@ class ReadThread(threading.Thread):
         self.client = client
         self.reader = None
         self.writer = None
-        self.in_history_mode = False
 
         try:
             self.reader = self.socket.makefile('r', encoding='utf-8')
@@ -38,325 +37,309 @@ class ReadThread(threading.Thread):
                 pass
             return
 
-        # Main loop: contact selection and messaging
-        skip_contact_selection = False
+        # Main loop: message-driven, always wait for server
         while True:
             try:
-                # Handle contact list and selection (unless we just did it)
-                if not skip_contact_selection:
-                    result = self.handle_contact_selection()
-                    if result is False:
-                        break
-                    elif result == "NO_CONTACTS":
-                        # No contacts available, just continue to next iteration
-                        continue
-                else:
-                    skip_contact_selection = False
-
-                # Handle conversation and messaging
-                conv_result = self.handle_conversation()
-                if conv_result is False:
-                    break
-                elif conv_result is True:
-                    # User typed 'back' and contact list was already shown inline
-                    # Skip contact selection on next iteration and go straight to next conversation
-                    skip_contact_selection = True
-                    continue
-
+                response = self.reader.readline().strip()
+                
+                if not response:
+                    print("\n\n👋 Disconnected from server. Goodbye!")
+                    import sys
+                    sys.exit(0)
+                
+                # Handle incoming notifications (can arrive anytime)
+                while response.startswith("MESSAGE:") or response.startswith("BROADCAST:") or response.startswith("GROUP_MESSAGE:"):
+                    if response.startswith("MESSAGE:"):
+                        parts = response.split(":", 2)
+                        if len(parts) == 3:
+                            sender = parts[1]
+                            text = parts[2]
+                            print(f"\n💬 New message from {sender}: {text}")
+                    elif response.startswith("BROADCAST:"):
+                        parts = response.split(":", 3)
+                        if len(parts) >= 3:
+                            sender = parts[1]
+                            text = parts[2]
+                            print(f"\n📢 [BROADCAST] {sender}: {text}")
+                    elif response.startswith("GROUP_MESSAGE:"):
+                        parts = response.split(":", 3)
+                        if len(parts) >= 4:
+                            group_name = parts[1]
+                            sender = parts[2]
+                            text = parts[3]
+                            print(f"\n👥 [{group_name}] {sender}: {text}")
+                    
+                    response = self.reader.readline().strip()
+                    if not response:
+                        import sys
+                        sys.exit(0)
+                
+                # Route based on server's protocol message
+                if response == "MAIN_MENU_START":
+                    # Display main menu
+                    self.display_main_menu()
+                    
+                elif response == "CONTACT_LIST_START":
+                    # Private messages - display contacts
+                    self.display_contact_list()
+                    # Continue waiting for next protocol message
+                    
+                elif response.startswith("CONVERSATION_START:"):
+                    # Private conversation started
+                    contact_name = response.split(":", 1)[1]
+                    self.client.set_current_contact(contact_name)
+                    self.display_conversation_header(contact_name)
+                    # Continue in message loop
+                    
+                elif response.startswith("BROADCAST_START"):
+                    # Broadcast channel
+                    self.display_broadcast_channel()
+                    # Continue in message loop
+                    
+                elif response == "MY_GROUPS_START":
+                    # My groups
+                    self.display_my_groups()
+                    # Continue waiting for selection result
+                    
+                elif response == "BROWSE_GROUPS_START":
+                    # Browse all groups
+                    self.display_browse_groups()
+                    # Continue waiting for selection result
+                    
+                elif response == "CREATE_GROUP_PROMPT":
+                    # Create group
+                    self.display_create_group_prompt()
+                    # Continue waiting for result
+                    
+                elif response.startswith("GROUP_CHAT_START:"):
+                    # Entering a group chat
+                    parts = response.split(":", 2)
+                    group_name = parts[1] if len(parts) > 1 else "Unknown Group"
+                    self.display_group_chat_header(group_name)
+                    # Continue in message loop
+                    
+                elif response.startswith("SENT:"):
+                    # Message sent confirmation
+                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+                    
+                elif response.startswith("BROADCAST_SENT:"):
+                    # Broadcast sent confirmation
+                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+                    
+                elif response.startswith("GROUP_SENT:"):
+                    # Group message sent confirmation
+                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+                    
+                elif response.startswith("JOIN_SUCCESS:"):
+                    message = response.split(":", 1)[1]
+                    print(f"\n✅ {message}")
+                    
+                elif response.startswith("JOIN_FAILED:") or response.startswith("NOT_MEMBER:") or response.startswith("INVALID"):
+                    message = response.split(":", 1)[1] if ":" in response else response
+                    print(f"\n❌ {message}")
+                    
+                elif response.startswith("CREATE_SUCCESS:"):
+                    parts = response.split(":", 2)
+                    if len(parts) >= 2:
+                        message = parts[1]
+                        print(f"\n✅ {message}")
+                        print("Would you like to enter the group now? (yes/no)")
+                        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+                        
+                elif response.startswith("CREATE_FAILED:"):
+                    message = response.split(":", 1)[1]
+                    print(f"\n❌ {message}")
+                    
+                elif response == "GROUP_MEMBERS_START":
+                    self.display_group_members()
+                    
+                elif response.startswith("LEAVE_RESULT:"):
+                    result = response.split(":", 1)[1]
+                    print(f"\n{result}")
+                    
+                elif response == "NO_CONTACTS:":
+                    print("\nNo contacts available yet.")
+                    print(f"[{self.client.get_user_name()}]: Press Enter to continue...", end='', flush=True)
+                    
+                # Ignore other messages or handle as needed
+                    
             except IOError as ex:
                 print(f"Error communicating with server: {ex}")
                 import traceback
                 traceback.print_exc()
                 break
 
-    def handle_contact_selection(self):
-        """Display contact list and handle selection"""
-        try:
-            response = self.reader.readline()
+    def display_main_menu(self):
+        """Display the main menu sent by server"""
+        while True:
+            line = self.reader.readline().strip()
+            if line == "MAIN_MENU_END":
+                break
+            print(line)
+        print(f"\n[{self.client.get_user_name()}] Select option: ", end='', flush=True)
 
-            # Check for disconnection (readline returns empty string when connection closed)
-            if response == '':
-                print("\n\n👋 Disconnected from server. Goodbye!")
-                import sys
-                sys.exit(0)
+    def display_contact_list(self):
+        """Display contact list"""
+        print("\n" + "="*60)
+        print("  CONTACTS")
+        print("="*60)
 
-            response = response.strip()
+        contacts = []
+        while True:
+            line = self.reader.readline().strip()
+            if line == "CONTACT_LIST_END":
+                break
 
-            # Handle incoming messages while waiting (before contact list)
-            incoming_sender = None
-            while response.startswith("MESSAGE:") or response.startswith("BROADCAST:"):
-                if response.startswith("MESSAGE:"):
-                    # Incoming message: MESSAGE:sender:text
-                    parts = response.split(":", 2)
-                    if len(parts) == 3:
-                        sender = parts[1]
-                        text = parts[2]
-                        print(f"\n💬 {sender}: {text}")
-                        incoming_sender = sender  # Remember the sender
-                elif response.startswith("BROADCAST:"):
-                    # Incoming broadcast: BROADCAST:sender:text
-                    parts = response.split(":", 3)
-                    if len(parts) >= 3:
-                        sender = parts[1]
-                        text = parts[2]
-                        print(f"\n📢 [BROADCAST] {sender}: {text}")
-                # Read next line
-                response = self.reader.readline().strip()
-                if not response:  # Check for disconnection
-                    print("\n\nDisconnected from server. Goodbye!")
-                    return False
-
-            # Check for no contacts message
-            if response.startswith("NO_CONTACTS"):
-                message = response.split(":", 1)[1] if ":" in response else "No contacts available"
-                print(f"\n{message}")
-                print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-                return "NO_CONTACTS"  # Signal to skip conversation handling
-
-            # Wait for contact list
-            if response != "CONTACT_LIST_START":
-                print(f"Unexpected response: {response}")
-                return False
-
-            # Display contact list
-            print("\n" + "="*60)
-            print("  CONTACTS")
-            print("="*60)
-
-            contacts = []
-            while True:
-                line = self.reader.readline().strip()
-                if line == "CONTACT_LIST_END":
-                    break
-
-                # Parse contact: username|status
-                if "|" in line:
-                    username, status = line.split("|", 1)
-                    if username == "BROADCAST":
-                        print(f"{len(contacts) + 1}. 📢 BROADCAST CHANNEL")
-                    else:
-                        status_symbol = "🟢" if status == "online" else "⚪"
-                        print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
-                    contacts.append(username)
-
-            print("="*60)
-
-            # Store contacts for write thread
-            self.client.set_contacts(contacts)
-
-            # If we received messages, suggest the sender
-            if incoming_sender:
-                print(f"\n💡 Select '{incoming_sender}' to reply to their message")
-
-            # Prompt for selection
-            print("Enter contact name (or press Enter to refresh, 'bye' to exit):")
-            print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-            return True
-
-        except Exception as e:
-            print(f"Error handling contact selection: {e}")
-            return False
-
-    def handle_conversation(self):
-        """Handle conversation display and incoming messages"""
-        try:
-            # Check for and display any pending messages before conversation starts
-            pending_messages = []
-
-            # Read first response
-            response = self.reader.readline()
-
-            # Check for disconnection immediately (readline returns empty when connection closed)
-            if not response:
-                print("\n\n👋 Goodbye! Disconnected from server.")
-                import sys
-                sys.exit(0)  # Force exit
-
-            response = response.strip()
-
-            # Collect all pending incoming messages
-            while response.startswith("MESSAGE:") or response.startswith("BROADCAST:"):
-                if response.startswith("MESSAGE:"):
-                    parts = response.split(":", 2)
-                    if len(parts) == 3:
-                        sender = parts[1]
-                        message_text = parts[2]
-                        pending_messages.append((sender, message_text))
-                        print(f"\n💬 New message from {sender}: {message_text}")
-                        print(f"    Type '{sender}' to reply!")
-                elif response.startswith("BROADCAST:"):
-                    parts = response.split(":", 3)
-                    if len(parts) >= 3:
-                        sender = parts[1]
-                        message_text = parts[2]
-                        pending_messages.append((f"[BROADCAST] {sender}", message_text))
-                        print(f"\n📢 New broadcast from {sender}: {message_text}")
-                        print(f"    Type 'BROADCAST' to join the channel!")
-
-                # Read next line
-                response = self.reader.readline()
-                if not response:
-                    import sys
-                    sys.exit(0)
-                response = response.strip()
-
-            # After displaying pending messages, show prompt again if any messages were displayed
-            if pending_messages:
-                print(f"\n[{self.client.get_user_name()}]: ", end='', flush=True)
-
-            # Check if user refreshed (pressed Enter) - server sends new contact list
-            if response == "CONTACT_LIST_START":
-                # User refreshed, display the new contact list
-                print("\n" + "="*60)
-                print("  CONTACTS (Refreshed)")
-                print("="*60)
-
-                contacts = []
-                while True:
-                    line = self.reader.readline().strip()
-                    if line == "CONTACT_LIST_END":
-                        break
-                    if "|" in line:
-                        username, status = line.split("|", 1)
-                        if username == "BROADCAST":
-                            print(f"{len(contacts) + 1}. 📢 BROADCAST CHANNEL")
-                        else:
-                            status_symbol = "🟢" if status == "online" else "⚪"
-                            print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
-                        contacts.append(username)
-
-                print("="*60)
-                self.client.set_contacts(contacts)
-                print("\nEnter contact name (or press Enter to refresh, 'bye' to exit):")
-                print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-                # Return True to continue - next iteration will wait for selection again
-                return True
-
-            # Handle various server responses
-            if response.startswith("INVALID_CONTACT"):
-                print("\n❌ Invalid contact selection. Please try again.")
-                return True  # Continue to next iteration
-
-            if response.startswith("CONTACT_NOT_FOUND"):
-                print("\n❌ Contact not found. Please try again.")
-                return True
-
-            if response.startswith("CONVERSATION_ERROR"):
-                print("\n❌ Error creating conversation. Please try again.")
-                return True
-
-            if not response.startswith("CONVERSATION_START") and not response.startswith("BROADCAST_START"):
-                print(f"Unexpected response: {response}")
-                return False
-
-            # Extract contact name or broadcast channel
-            if response.startswith("BROADCAST_START"):
-                contact_name = "BROADCAST CHANNEL"
-                header = "📢 BROADCAST CHANNEL"
-            else:
-                contact_name = response.split(":", 1)[1] if ":" in response else "Unknown"
-                header = f"CONVERSATION WITH {contact_name}"
-            
-            self.client.set_current_contact(contact_name)
-
-            # Display conversation header
-            print("\n" + "="*60)
-            print(f"  {header}")
-            print("="*60)
-
-            # Display conversation history
-            while True:
-                line = self.reader.readline().strip()
-                if line == "CONVERSATION_READY":
-                    break
-                print(line)
-
-            print("="*60)
-            print("Type 'back' to return to contacts, or start chatting:")
-            print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-            # Handle incoming messages in conversation
-            while True:
-                message = self.reader.readline()
-
-                # Check for disconnection
-                if not message:
-                    print("\n\n👋 Connection closed by server.")
-                    import sys
-                    sys.exit(0)
-
-                message = message.strip()
-
-                # Handle different message types
-                if message.startswith("MESSAGE:"):
-                    # Incoming message from other user: MESSAGE:sender:text
-                    parts = message.split(":", 2)
-                    if len(parts) == 3:
-                        sender = parts[1]
-                        text = parts[2]
-                        print(f"\n{sender}: {text}")
-                        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-                elif message.startswith("BROADCAST:"):
-                    # Incoming broadcast message: BROADCAST:sender:text
-                    parts = message.split(":", 3)
-                    if len(parts) >= 3:
-                        sender = parts[1]
-                        text = parts[2]
-                        print(f"\n📢 {sender}: {text}")
-                        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-                elif message.startswith("SENT:"):
-                    # Confirmation that our message was sent
-                    # Show prompt again so user can continue typing
-                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-                elif message.startswith("BROADCAST_SENT:"):
-                    # Confirmation that our broadcast was sent
-                    status = message.split(":", 1)[1] if ":" in message else "Broadcast sent"
-                    print(f"\n✅ {status}")
-                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-                elif message == "CONTACT_LIST_START":
-                    # User typed 'back' - server is sending new contact list
-                    # Display it and exit this conversation
-                    print("\n" + "="*60)
-                    print("  CONTACTS")
-                    print("="*60)
-
-                    contacts = []
-                    while True:
-                        line = self.reader.readline().strip()
-                        if line == "CONTACT_LIST_END":
-                            break
-                        if "|" in line:
-                            username, status = line.split("|", 1)
-                            status_symbol = "🟢" if status == "online" else "⚪"
-                            print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
-                            contacts.append(username)
-
-                    print("="*60)
-                    self.client.set_contacts(contacts)
-                    print("\nEnter contact name (or press Enter to refresh, 'bye' to exit):")
-                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-
-                    # Return True to indicate we should continue with another conversation
-                    # The main loop will call handle_conversation again
-                    # which will wait for the next CONVERSATION_START after user selects
-                    return True
-
+            if "|" in line:
+                username, status = line.split("|", 1)
+                if username == "BROADCAST":
+                    print(f"{len(contacts) + 1}. 📢 BROADCAST CHANNEL")
                 else:
-                    # Unknown message
-                    print(f"\nServer: {message}")
-                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+                    status_symbol = "🟢" if status == "online" else "⚪"
+                    print(f"{len(contacts) + 1}. {username} {status_symbol} {status}")
+                contacts.append(username)
 
-        except Exception as e:
-            print(f"Error handling conversation: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+        print("="*60)
+        self.client.set_contacts(contacts)
+        print("Enter contact name, 'back' for main menu, or 'bye' to exit:")
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
+    def display_conversation_header(self, contact_name):
+        """Display conversation header and history"""
+        print("\n" + "="*60)
+        print(f"  CONVERSATION WITH {contact_name}")
+        print("="*60)
+        
+        # Display history
+        while True:
+            line = self.reader.readline().strip()
+            if line == "CONVERSATION_READY":
+                break
+            print(line)
+        
+        print("="*60)
+        print("Type 'back' to return to contacts, or start chatting:")
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
+    def display_broadcast_channel(self):
+        """Display broadcast history"""
+        print("\n" + "="*60)
+        print("  📢 BROADCAST CHANNEL")
+        print("="*60)
+        
+        # Read history
+        while True:
+            line = self.reader.readline().strip()
+            if line == "CONVERSATION_READY":
+                break
+            print(line)
+        
+        print("="*60)
+        print("Type 'back' to return to main menu, or start chatting:")
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
+    def display_my_groups(self):
+        """Display my groups"""
+        next_line = self.reader.readline().strip()
+        
+        if next_line.startswith("NO_GROUPS:"):
+            message = next_line.split(":", 1)[1]
+            print(f"\n{message}")
+            self.reader.readline()  # MY_GROUPS_END
+            print(f"\n[{self.client.get_user_name()}]: Press Enter to return to main menu...", end='', flush=True)
+            return
+        
+        print("\n" + "="*60)
+        print("  👥 MY GROUPS")
+        print("="*60)
+        
+        line = next_line
+        while line != "MY_GROUPS_END":
+            if "|" in line:
+                parts = line.split("|")
+                if len(parts) == 5:
+                    group_id, name, desc, members, role = parts
+                    print(f"{group_id}. {role} {name} ({members} members)")
+                    print(f"   {desc}")
+            line = self.reader.readline().strip()
+        
+        print("="*60)
+        print("Enter group ID to open, or 'back' to return to main menu:")
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
+    def display_browse_groups(self):
+        """Display all groups"""
+        next_line = self.reader.readline().strip()
+        
+        if next_line.startswith("NO_GROUPS:"):
+            message = next_line.split(":", 1)[1]
+            print(f"\n{message}")
+            self.reader.readline()  # BROWSE_GROUPS_END
+            print(f"\n[{self.client.get_user_name()}]: Press Enter to return to main menu...", end='', flush=True)
+            return
+        
+        print("\n" + "="*60)
+        print("  🔍 ALL GROUPS")
+        print("="*60)
+        
+        line = next_line
+        while line != "BROWSE_GROUPS_END":
+            if "|" in line:
+                parts = line.split("|")
+                if len(parts) == 5:
+                    group_id, name, desc, members, status = parts
+                    print(f"{group_id}. {name} ({members} members) - {status}")
+                    print(f"   {desc}")
+            line = self.reader.readline().strip()
+        
+        print("="*60)
+        print("Enter 'join:GROUP_ID' to join, GROUP_ID to open, or 'back' for main menu:")
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
+    def display_create_group_prompt(self):
+        """Display create group prompt"""
+        print("\n" + "="*60)
+        print("  ➕ CREATE NEW GROUP")
+        print("="*60)
+        print("Enter group name (or 'back' to cancel):")
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+        
+        # Server will wait for name, then description
+        # After we get the name response, we need to prompt for description
+        # But this will be handled by the next message from server
+
+    def display_group_chat_header(self, group_name):
+        """Display group chat header and history"""
+        print("\n" + "="*60)
+        print(f"  👥 GROUP: {group_name}")
+        print("="*60)
+        
+        # Display history
+        while True:
+            line = self.reader.readline().strip()
+            if line == "GROUP_CHAT_READY":
+                break
+            print(line)
+        
+        print("="*60)
+        print("Commands: 'back' (return), '/members' (show members), '/leave' (leave group)")
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
+    def display_group_members(self):
+        """Display group members list"""
+        print("\n" + "-"*40)
+        print("GROUP MEMBERS:")
+        while True:
+            line = self.reader.readline().strip()
+            if line == "GROUP_MEMBERS_END":
+                break
+            if "|" in line:
+                parts = line.split("|")
+                if len(parts) == 3:
+                    username, role, joined = parts
+                    print(f"  {role} {username} (joined {joined})")
+        print("-"*40)
+        print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
     def handle_authentication(self):
         """Handle the complete authentication flow"""
@@ -379,7 +362,6 @@ class ReadThread(threading.Thread):
                     if choice == "1":
                         if self.do_login():
                             return True
-                        # If login fails, it will redirect to signup
                     elif choice == "2":
                         return self.do_signup()
                     else:
@@ -431,8 +413,12 @@ class ReadThread(threading.Thread):
             elif response.startswith("AUTH_FAILED"):
                 message = response.split(":", 1)[1] if ":" in response else "Login failed"
                 print(f"\n{message}")
-                print("Redirecting to sign up...\n")
-                return self.do_signup()
+                retry = input("Try again? (y/n): ").strip().lower()
+                if retry == 'y':
+                    return self.do_login()
+                else:
+                    print("Redirecting to sign up...\n")
+                    return self.do_signup()
             else:
                 print(f"Unexpected server response: {response}")
                 return False
@@ -476,7 +462,7 @@ class ReadThread(threading.Thread):
                 # Check password match
                 if password != password_confirm:
                     print("Passwords do not match. Please try again.")
-                    continue  # Loop again, don't send to server yet
+                    continue
 
                 # Passwords match and are not empty, break out of loop
                 break
@@ -501,7 +487,7 @@ class ReadThread(threading.Thread):
                 print(f"\n{message}")
                 retry = input("Try again? (y/n): ").strip().lower()
                 if retry == 'y':
-                    return self.do_signup()  # Now it's safe to retry
+                    return self.do_signup()
                 else:
                     return False
             else:

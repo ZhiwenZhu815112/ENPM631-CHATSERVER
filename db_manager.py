@@ -412,6 +412,374 @@ class DatabaseManager:
             if conn:
                 self.return_connection(conn)
 
+    def create_group(self, group_name, creator_id, description=None):
+        """
+        Create a new group
+        Returns: (success: bool, group_id: int or None, message: str)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Check if group name already exists
+            cursor.execute("SELECT group_id FROM groups WHERE group_name = %s AND is_active = TRUE", (group_name,))
+            if cursor.fetchone():
+                cursor.close()
+                return False, None, "Group name already exists"
+
+            # Create group
+            cursor.execute(
+                """
+                INSERT INTO groups (group_name, creator_id, description)
+                VALUES (%s, %s, %s)
+                RETURNING group_id
+                """,
+                (group_name, creator_id, description)
+            )
+            group_id = cursor.fetchone()[0]
+
+            # Add creator as admin member
+            cursor.execute(
+                """
+                INSERT INTO group_members (group_id, user_id, role)
+                VALUES (%s, %s, 'admin')
+                """,
+                (group_id, creator_id)
+            )
+
+            conn.commit()
+            cursor.close()
+            return True, group_id, "Group created successfully"
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            return False, None, f"Error creating group: {e}"
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def get_user_groups(self, user_id):
+        """
+        Get all groups that a user is a member of
+        Returns: list of (group_id, group_name, description, role, member_count)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT 
+                    g.group_id,
+                    g.group_name,
+                    g.description,
+                    gm.role,
+                    (SELECT COUNT(*) FROM group_members WHERE group_id = g.group_id) as member_count
+                FROM groups g
+                JOIN group_members gm ON g.group_id = gm.group_id
+                WHERE gm.user_id = %s AND g.is_active = TRUE
+                ORDER BY g.created_at DESC
+                """,
+                (user_id,)
+            )
+
+            groups = cursor.fetchall()
+            cursor.close()
+            return groups
+
+        except Exception as e:
+            print(f"Error retrieving user groups: {e}")
+            return []
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def get_all_groups(self):
+        """
+        Get all active groups with member counts
+        Returns: list of (group_id, group_name, description, member_count)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT 
+                    g.group_id,
+                    g.group_name,
+                    g.description,
+                    (SELECT COUNT(*) FROM group_members WHERE group_id = g.group_id) as member_count
+                FROM groups g
+                WHERE g.is_active = TRUE
+                ORDER BY g.created_at DESC
+                """
+            )
+
+            groups = cursor.fetchall()
+            cursor.close()
+            return groups
+
+        except Exception as e:
+            print(f"Error retrieving all groups: {e}")
+            return []
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def join_group(self, group_id, user_id):
+        """
+        Add a user to a group
+        Returns: (success: bool, message: str)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Check if user is already a member
+            cursor.execute(
+                "SELECT membership_id FROM group_members WHERE group_id = %s AND user_id = %s",
+                (group_id, user_id)
+            )
+            if cursor.fetchone():
+                cursor.close()
+                return False, "You are already a member of this group"
+
+            # Check if group exists and is active
+            cursor.execute(
+                "SELECT group_id FROM groups WHERE group_id = %s AND is_active = TRUE",
+                (group_id,)
+            )
+            if not cursor.fetchone():
+                cursor.close()
+                return False, "Group not found or inactive"
+
+            # Add user to group
+            cursor.execute(
+                """
+                INSERT INTO group_members (group_id, user_id, role)
+                VALUES (%s, %s, 'member')
+                """,
+                (group_id, user_id)
+            )
+
+            conn.commit()
+            cursor.close()
+            return True, "Successfully joined group"
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            return False, f"Error joining group: {e}"
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def leave_group(self, group_id, user_id):
+        """
+        Remove a user from a group
+        Returns: (success: bool, message: str)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Check if user is a member
+            cursor.execute(
+                "SELECT role FROM group_members WHERE group_id = %s AND user_id = %s",
+                (group_id, user_id)
+            )
+            result = cursor.fetchone()
+            if not result:
+                cursor.close()
+                return False, "You are not a member of this group"
+
+            # Remove user from group
+            cursor.execute(
+                "DELETE FROM group_members WHERE group_id = %s AND user_id = %s",
+                (group_id, user_id)
+            )
+
+            # Check if group is now empty, deactivate if so
+            cursor.execute(
+                "SELECT COUNT(*) FROM group_members WHERE group_id = %s",
+                (group_id,)
+            )
+            member_count = cursor.fetchone()[0]
+            
+            if member_count == 0:
+                cursor.execute(
+                    "UPDATE groups SET is_active = FALSE WHERE group_id = %s",
+                    (group_id,)
+                )
+
+            conn.commit()
+            cursor.close()
+            return True, "Successfully left group"
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            return False, f"Error leaving group: {e}"
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def get_group_members(self, group_id):
+        """
+        Get all members of a group
+        Returns: list of (user_id, username, role, joined_at)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT 
+                    u.user_id,
+                    u.username,
+                    gm.role,
+                    gm.joined_at
+                FROM group_members gm
+                JOIN users u ON gm.user_id = u.user_id
+                WHERE gm.group_id = %s
+                ORDER BY gm.joined_at
+                """,
+                (group_id,)
+            )
+
+            members = cursor.fetchall()
+            cursor.close()
+            return members
+
+        except Exception as e:
+            print(f"Error retrieving group members: {e}")
+            return []
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def is_group_member(self, group_id, user_id):
+        """
+        Check if a user is a member of a group
+        Returns: bool
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT membership_id FROM group_members WHERE group_id = %s AND user_id = %s",
+                (group_id, user_id)
+            )
+            result = cursor.fetchone()
+            cursor.close()
+            return result is not None
+
+        except Exception as e:
+            print(f"Error checking group membership: {e}")
+            return False
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def save_group_message(self, group_id, sender_id, sender_username, message_text):
+        """Save a message to a group"""
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO group_messages (group_id, sender_id, sender_username, message_text)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (group_id, sender_id, sender_username, message_text)
+            )
+
+            conn.commit()
+            cursor.close()
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            print(f"Error saving group message: {e}")
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def get_group_messages(self, group_id, limit=50):
+        """
+        Retrieve recent messages from a group
+        Returns: list of (sender_username, message_text, timestamp)
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT sender_username, message_text, timestamp
+                FROM group_messages
+                WHERE group_id = %s
+                ORDER BY timestamp DESC
+                LIMIT %s
+                """,
+                (group_id, limit)
+            )
+            messages = cursor.fetchall()
+            cursor.close()
+
+            # Reverse to show oldest first
+            return list(reversed(messages))
+
+        except Exception as e:
+            print(f"Error retrieving group messages: {e}")
+            return []
+        finally:
+            if conn:
+                self.return_connection(conn)
+
+    def get_group_info(self, group_id):
+        """
+        Get information about a group
+        Returns: (group_name, description, creator_id, created_at) or None
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT group_name, description, creator_id, created_at
+                FROM groups
+                WHERE group_id = %s AND is_active = TRUE
+                """,
+                (group_id,)
+            )
+            result = cursor.fetchone()
+            cursor.close()
+            return result
+
+        except Exception as e:
+            print(f"Error retrieving group info: {e}")
+            return None
+        finally:
+            if conn:
+                self.return_connection(conn)
+
     def close_all_connections(self):
         """Close all connections in the pool"""
         if self.connection_pool:

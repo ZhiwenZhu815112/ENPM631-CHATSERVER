@@ -23,8 +23,8 @@ cd chatp
 minikube start --cpus=4 --memory=4096
 
 # 3. Build Docker images
-docker build -t chat-server:latest .
-docker build -t chat-autoscaler:latest -f Dockerfile.autoscaler .
+docker build --no-cache -t chat-server:latest .
+docker build --no-cache -t chat-autoscaler:latest -f Dockerfile.autoscaler .
 
 # 4. Pull public images (Redis & PostgreSQL)
 docker pull redis:7-alpine
