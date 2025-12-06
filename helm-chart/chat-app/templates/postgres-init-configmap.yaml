@@ -5,7 +5,7 @@ metadata:
   namespace: chat-app
 data:
   schema.sql: |
-    -- Database schema for chat application
+    -- Database schema for chat application with Group Chat support
     -- Run this to initialize the PostgreSQL database
 
     -- Users table: stores user credentials
@@ -57,6 +57,36 @@ data:
         is_active BOOLEAN DEFAULT TRUE
     );
 
+    -- Groups table: stores group information
+    CREATE TABLE IF NOT EXISTS groups (
+        group_id SERIAL PRIMARY KEY,
+        group_name VARCHAR(100) NOT NULL,
+        creator_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        description TEXT,
+        is_active BOOLEAN DEFAULT TRUE
+    );
+
+    -- Group members table: tracks which users belong to which groups
+    CREATE TABLE IF NOT EXISTS group_members (
+        membership_id SERIAL PRIMARY KEY,
+        group_id INTEGER REFERENCES groups(group_id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        role VARCHAR(20) DEFAULT 'member',
+        CONSTRAINT unique_group_member UNIQUE (group_id, user_id)
+    );
+
+    -- Group messages table: stores messages sent in groups
+    CREATE TABLE IF NOT EXISTS group_messages (
+        message_id SERIAL PRIMARY KEY,
+        group_id INTEGER REFERENCES groups(group_id) ON DELETE CASCADE,
+        sender_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+        sender_username VARCHAR(50) NOT NULL,
+        message_text TEXT NOT NULL,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Create indexes for better query performance
     CREATE INDEX IF NOT EXISTS idx_conversations_participant1 ON conversations(participant1_id);
     CREATE INDEX IF NOT EXISTS idx_conversations_participant2 ON conversations(participant2_id);
@@ -69,3 +99,10 @@ data:
     CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
     CREATE INDEX IF NOT EXISTS idx_broadcast_timestamp ON broadcast_messages(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_broadcast_sender ON broadcast_messages(sender_id);
+    CREATE INDEX IF NOT EXISTS idx_groups_creator ON groups(creator_id);
+    CREATE INDEX IF NOT EXISTS idx_groups_active ON groups(is_active);
+    CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
+    CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
+    CREATE INDEX IF NOT EXISTS idx_group_messages_group ON group_messages(group_id);
+    CREATE INDEX IF NOT EXISTS idx_group_messages_timestamp ON group_messages(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_group_messages_sender ON group_messages(sender_id);
