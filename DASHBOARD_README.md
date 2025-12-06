@@ -51,6 +51,7 @@ pip install -r dashboard-requirements.txt
 **Linux/macOS:**
 ```bash
 chmod +x start-dashboard.sh
+
 ./start-dashboard.sh
 ```
 
@@ -253,3 +254,11 @@ To extend the dashboard:
 ## License 📄
 
 This dashboard is part of the Chat Server project and follows the same license terms.
+
+
+
+
+If you are running into issues with redis an postgres, apply port forwaring. Run the two following commands in their own terminals. 
+
+kubectl port-forward -n chat-app service/redis-service 6379:6379
+kubectl port-forward -n chat-app service/postgres-service 5432:5432
