@@ -1,0 +1,916 @@
+diff --git a/chat_server.py b/chat_server.py
+index e70c53a..26b6625 100644
+--- a/chat_server.py
++++ b/chat_server.py
+@@ -187,7 +187,24 @@ class ChatServer:
+     def get_db_manager(self):
+         """Return the database manager instance"""
+         return self.db_manager
+-
++    
++    def send_to_group_members(self, group_member_usernames, message, exclude_username=None):
++        """
++        Send a message to multiple users (for group chat)
++        Args:
++            group_member_usernames: List of usernames to send to
++            message: Message content to send
++            exclude_username: Username to exclude (typically the sender)
++        Returns:
++            Number of users message was delivered to
++        """
++        delivered_count = 0
++        for username in group_member_usernames:
++            if exclude_username and username == exclude_username:
++                continue
++            if self.send_to_user(username, message):
++                delivered_count += 1
++        return delivered_count
+ 
+ if __name__ == "__main__":
+     if len(sys.argv) < 2:
+diff --git a/db_manager.py b/db_manager.py
+index f7b7c88..8face4b 100644
+--- a/db_manager.py
++++ b/db_manager.py
+@@ -412,6 +412,374 @@ class DatabaseManager:
+             if conn:
+                 self.return_connection(conn)
+ 
++    def create_group(self, group_name, creator_id, description=None):
++        """
++        Create a new group
++        Returns: (success: bool, group_id: int or None, message: str)
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            # Check if group name already exists
++            cursor.execute("SELECT group_id FROM groups WHERE group_name = %s AND is_active = TRUE", (group_name,))
++            if cursor.fetchone():
++                cursor.close()
++                return False, None, "Group name already exists"
++
++            # Create group
++            cursor.execute(
++                """
++                INSERT INTO groups (group_name, creator_id, description)
++                VALUES (%s, %s, %s)
++                RETURNING group_id
++                """,
++                (group_name, creator_id, description)
++            )
++            group_id = cursor.fetchone()[0]
++
++            # Add creator as admin member
++            cursor.execute(
++                """
++                INSERT INTO group_members (group_id, user_id, role)
++                VALUES (%s, %s, 'admin')
++                """,
++                (group_id, creator_id)
++            )
++
++            conn.commit()
++            cursor.close()
++            return True, group_id, "Group created successfully"
++
++        except Exception as e:
++            if conn:
++                conn.rollback()
++            return False, None, f"Error creating group: {e}"
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def get_user_groups(self, user_id):
++        """
++        Get all groups that a user is a member of
++        Returns: list of (group_id, group_name, description, role, member_count)
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            cursor.execute(
++                """
++                SELECT 
++                    g.group_id,
++                    g.group_name,
++                    g.description,
++                    gm.role,
++                    (SELECT COUNT(*) FROM group_members WHERE group_id = g.group_id) as member_count
++                FROM groups g
++                JOIN group_members gm ON g.group_id = gm.group_id
++                WHERE gm.user_id = %s AND g.is_active = TRUE
++                ORDER BY g.created_at DESC
++                """,
++                (user_id,)
++            )
++
++            groups = cursor.fetchall()
++            cursor.close()
++            return groups
++
++        except Exception as e:
++            print(f"Error retrieving user groups: {e}")
++            return []
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def get_all_groups(self):
++        """
++        Get all active groups with member counts
++        Returns: list of (group_id, group_name, description, member_count)
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            cursor.execute(
++                """
++                SELECT 
++                    g.group_id,
++                    g.group_name,
++                    g.description,
++                    (SELECT COUNT(*) FROM group_members WHERE group_id = g.group_id) as member_count
++                FROM groups g
++                WHERE g.is_active = TRUE
++                ORDER BY g.created_at DESC
++                """
++            )
++
++            groups = cursor.fetchall()
++            cursor.close()
++            return groups
++
++        except Exception as e:
++            print(f"Error retrieving all groups: {e}")
++            return []
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def join_group(self, group_id, user_id):
++        """
++        Add a user to a group
++        Returns: (success: bool, message: str)
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            # Check if user is already a member
++            cursor.execute(
++                "SELECT membership_id FROM group_members WHERE group_id = %s AND user_id = %s",
++                (group_id, user_id)
++            )
++            if cursor.fetchone():
++                cursor.close()
++                return False, "You are already a member of this group"
++
++            # Check if group exists and is active
++            cursor.execute(
++                "SELECT group_id FROM groups WHERE group_id = %s AND is_active = TRUE",
++                (group_id,)
++            )
++            if not cursor.fetchone():
++                cursor.close()
++                return False, "Group not found or inactive"
++
++            # Add user to group
++            cursor.execute(
++                """
++                INSERT INTO group_members (group_id, user_id, role)
++                VALUES (%s, %s, 'member')
++                """,
++                (group_id, user_id)
++            )
++
++            conn.commit()
++            cursor.close()
++            return True, "Successfully joined group"
++
++        except Exception as e:
++            if conn:
++                conn.rollback()
++            return False, f"Error joining group: {e}"
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def leave_group(self, group_id, user_id):
++        """
++        Remove a user from a group
++        Returns: (success: bool, message: str)
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            # Check if user is a member
++            cursor.execute(
++                "SELECT role FROM group_members WHERE group_id = %s AND user_id = %s",
++                (group_id, user_id)
++            )
++            result = cursor.fetchone()
++            if not result:
++                cursor.close()
++                return False, "You are not a member of this group"
++
++            # Remove user from group
++            cursor.execute(
++                "DELETE FROM group_members WHERE group_id = %s AND user_id = %s",
++                (group_id, user_id)
++            )
++
++            # Check if group is now empty, deactivate if so
++            cursor.execute(
++                "SELECT COUNT(*) FROM group_members WHERE group_id = %s",
++                (group_id,)
++            )
++            member_count = cursor.fetchone()[0]
++            
++            if member_count == 0:
++                cursor.execute(
++                    "UPDATE groups SET is_active = FALSE WHERE group_id = %s",
++                    (group_id,)
++                )
++
++            conn.commit()
++            cursor.close()
++            return True, "Successfully left group"
++
++        except Exception as e:
++            if conn:
++                conn.rollback()
++            return False, f"Error leaving group: {e}"
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def get_group_members(self, group_id):
++        """
++        Get all members of a group
++        Returns: list of (user_id, username, role, joined_at)
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            cursor.execute(
++                """
++                SELECT 
++                    u.user_id,
++                    u.username,
++                    gm.role,
++                    gm.joined_at
++                FROM group_members gm
++                JOIN users u ON gm.user_id = u.user_id
++                WHERE gm.group_id = %s
++                ORDER BY gm.joined_at
++                """,
++                (group_id,)
++            )
++
++            members = cursor.fetchall()
++            cursor.close()
++            return members
++
++        except Exception as e:
++            print(f"Error retrieving group members: {e}")
++            return []
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def is_group_member(self, group_id, user_id):
++        """
++        Check if a user is a member of a group
++        Returns: bool
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            cursor.execute(
++                "SELECT membership_id FROM group_members WHERE group_id = %s AND user_id = %s",
++                (group_id, user_id)
++            )
++            result = cursor.fetchone()
++            cursor.close()
++            return result is not None
++
++        except Exception as e:
++            print(f"Error checking group membership: {e}")
++            return False
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def save_group_message(self, group_id, sender_id, sender_username, message_text):
++        """Save a message to a group"""
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            cursor.execute(
++                """
++                INSERT INTO group_messages (group_id, sender_id, sender_username, message_text)
++                VALUES (%s, %s, %s, %s)
++                """,
++                (group_id, sender_id, sender_username, message_text)
++            )
++
++            conn.commit()
++            cursor.close()
++
++        except Exception as e:
++            if conn:
++                conn.rollback()
++            print(f"Error saving group message: {e}")
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def get_group_messages(self, group_id, limit=50):
++        """
++        Retrieve recent messages from a group
++        Returns: list of (sender_username, message_text, timestamp)
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            cursor.execute(
++                """
++                SELECT sender_username, message_text, timestamp
++                FROM group_messages
++                WHERE group_id = %s
++                ORDER BY timestamp DESC
++                LIMIT %s
++                """,
++                (group_id, limit)
++            )
++            messages = cursor.fetchall()
++            cursor.close()
++
++            # Reverse to show oldest first
++            return list(reversed(messages))
++
++        except Exception as e:
++            print(f"Error retrieving group messages: {e}")
++            return []
++        finally:
++            if conn:
++                self.return_connection(conn)
++
++    def get_group_info(self, group_id):
++        """
++        Get information about a group
++        Returns: (group_name, description, creator_id, created_at) or None
++        """
++        conn = None
++        try:
++            conn = self.get_connection()
++            cursor = conn.cursor()
++
++            cursor.execute(
++                """
++                SELECT group_name, description, creator_id, created_at
++                FROM groups
++                WHERE group_id = %s AND is_active = TRUE
++                """,
++                (group_id,)
++            )
++            result = cursor.fetchone()
++            cursor.close()
++            return result
++
++        except Exception as e:
++            print(f"Error retrieving group info: {e}")
++            return None
++        finally:
++            if conn:
++                self.return_connection(conn)
++
+     def close_all_connections(self):
+         """Close all connections in the pool"""
+         if self.connection_pool:
+diff --git a/helm-chart/chat-app/templates/postgres-init-configmap.yaml b/helm-chart/chat-app/templates/postgres-init-configmap.yaml
+index 9a3363a..56adce5 100644
+--- a/helm-chart/chat-app/templates/postgres-init-configmap.yaml
++++ b/helm-chart/chat-app/templates/postgres-init-configmap.yaml
+@@ -5,7 +5,7 @@ metadata:
+   namespace: chat-app
+ data:
+   schema.sql: |
+-    -- Database schema for chat application
++    -- Database schema for chat application with Group Chat support
+     -- Run this to initialize the PostgreSQL database
+ 
+     -- Users table: stores user credentials
+@@ -57,6 +57,36 @@ data:
+         is_active BOOLEAN DEFAULT TRUE
+     );
+ 
++    -- Groups table: stores group information
++    CREATE TABLE IF NOT EXISTS groups (
++        group_id SERIAL PRIMARY KEY,
++        group_name VARCHAR(100) NOT NULL,
++        creator_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
++        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++        description TEXT,
++        is_active BOOLEAN DEFAULT TRUE
++    );
++
++    -- Group members table: tracks which users belong to which groups
++    CREATE TABLE IF NOT EXISTS group_members (
++        membership_id SERIAL PRIMARY KEY,
++        group_id INTEGER REFERENCES groups(group_id) ON DELETE CASCADE,
++        user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
++        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++        role VARCHAR(20) DEFAULT 'member',
++        CONSTRAINT unique_group_member UNIQUE (group_id, user_id)
++    );
++
++    -- Group messages table: stores messages sent in groups
++    CREATE TABLE IF NOT EXISTS group_messages (
++        message_id SERIAL PRIMARY KEY,
++        group_id INTEGER REFERENCES groups(group_id) ON DELETE CASCADE,
++        sender_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
++        sender_username VARCHAR(50) NOT NULL,
++        message_text TEXT NOT NULL,
++        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
++    );
++
+     -- Create indexes for better query performance
+     CREATE INDEX IF NOT EXISTS idx_conversations_participant1 ON conversations(participant1_id);
+     CREATE INDEX IF NOT EXISTS idx_conversations_participant2 ON conversations(participant2_id);
+@@ -69,3 +99,10 @@ data:
+     CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
+     CREATE INDEX IF NOT EXISTS idx_broadcast_timestamp ON broadcast_messages(timestamp DESC);
+     CREATE INDEX IF NOT EXISTS idx_broadcast_sender ON broadcast_messages(sender_id);
++    CREATE INDEX IF NOT EXISTS idx_groups_creator ON groups(creator_id);
++    CREATE INDEX IF NOT EXISTS idx_groups_active ON groups(is_active);
++    CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
++    CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
++    CREATE INDEX IF NOT EXISTS idx_group_messages_group ON group_messages(group_id);
++    CREATE INDEX IF NOT EXISTS idx_group_messages_timestamp ON group_messages(timestamp DESC);
++    CREATE INDEX IF NOT EXISTS idx_group_messages_sender ON group_messages(sender_id);
+\ No newline at end of file
+diff --git a/read_thread.py b/read_thread.py
+index ebc4f7e..9be1911 100644
+--- a/read_thread.py
++++ b/read_thread.py
+@@ -431,8 +431,12 @@ class ReadThread(threading.Thread):
+             elif response.startswith("AUTH_FAILED"):
+                 message = response.split(":", 1)[1] if ":" in response else "Login failed"
+                 print(f"\n{message}")
+-                print("Redirecting to sign up...\n")
+-                return self.do_signup()
++                retry = input("Try again? (y/n): ").strip().lower()
++                if retry == 'y':
++                    return self.do_login()
++                else:
++                    print("Redirecting to sign up...\n")
++                    return self.do_signup()
+             else:
+                 print(f"Unexpected server response: {response}")
+                 return False
+diff --git a/user_thread.py b/user_thread.py
+index 5acff0a..cb3817f 100644
+--- a/user_thread.py
++++ b/user_thread.py
+@@ -6,7 +6,7 @@ This thread handles connection for each connected client, so the server
+ can handle multiple clients at the same time.
+ 
+ @author www.codejava.net (Java version)
+-Python port with authentication and message storage
++Python port with authentication, message storage, and group chat
+ """
+ 
+ class UserThread(threading.Thread):
+@@ -34,54 +34,37 @@ class UserThread(threading.Thread):
+             # Add user to online users
+             self.server.add_online_user(user_name, self)
+ 
+-            # Main contact selection and messaging loop
++            # Main menu and navigation loop
+             while True:
+-                # Send contact list (always includes BROADCAST)
+-                contact_list = self.send_contact_list()
+-
+-                # Contact list always has at least BROADCAST, so we no longer need NO_CONTACTS handling
+-
+-                # Wait for contact selection
+-                selected_contact = input_stream.readline().strip()
+-
+-                # Handle special commands
+-                if selected_contact == "bye":
+-                    break
+-                elif not selected_contact:
+-                    # Empty input = refresh contact list
+-                    continue
+-                elif selected_contact == "BROADCAST":
+-                    # Handle broadcast messaging
++                # Display main menu
++                self.send_main_menu()
++
++                # Wait for menu selection
++                menu_choice = input_stream.readline().strip()
++
++                # Handle menu options
++                if menu_choice == "1":
++                    # Private Messages
++                    self.handle_private_messages(input_stream, user_name)
++                elif menu_choice == "2":
++                    # Broadcast Channel
+                     self.handle_broadcast_chat(input_stream, user_name)
++                elif menu_choice == "3":
++                    # My Groups
++                    self.handle_my_groups(input_stream, user_name)
++                elif menu_choice == "4":
++                    # Browse All Groups
++                    self.handle_browse_groups(input_stream, user_name)
++                elif menu_choice == "5":
++                    # Create New Group
++                    self.handle_create_group(input_stream, user_name)
++                elif menu_choice == "bye":
++                    break
++                elif not menu_choice:
+                     continue
+-
+-                # Note: Don't validate against cached contact_list - check database instead
+-                # This allows users to message people who logged in after the list was shown
+-
+-                # Get user_id of selected contact
+-                recipient_id = None
+-                for uid, uname, _ in self.db_manager.get_all_users():
+-                    if uname == selected_contact:
+-                        recipient_id = uid
+-                        break
+-
+-                if not recipient_id:
+-                    self.writer.write("CONTACT_NOT_FOUND:Contact not found\n")
+-                    self.writer.flush()
+-                    continue
+-
+-                # Get or create conversation
+-                conversation_id = self.db_manager.get_or_create_conversation(self.user_id, recipient_id)
+-                if not conversation_id:
+-                    self.writer.write("CONVERSATION_ERROR:Could not create conversation\n")
++                else:
++                    self.writer.write("INVALID_OPTION:Invalid menu option\n")
+                     self.writer.flush()
+-                    continue
+-
+-                # Send conversation history
+-                self.send_conversation_history(conversation_id, selected_contact)
+-
+-                # Enter messaging mode with selected contact
+-                self.chat_with_contact(input_stream, user_name, selected_contact, conversation_id)
+ 
+             # Cleanup
+             if self.session_id:
+@@ -175,6 +158,71 @@ class UserThread(threading.Thread):
+             self.writer.flush()
+             return None
+ 
++    def send_main_menu(self):
++        """Send the main menu to the client"""
++        self.writer.write("MAIN_MENU_START\n")
++        self.writer.flush()
++        
++        # Menu header
++        menu = """
++========================================
++        CHAT APPLICATION MENU
++========================================
++1. 💬 Private Messages
++2. 📢 Broadcast Channel
++3. 👥 My Groups
++4. 🔍 Browse All Groups
++5. ➕ Create New Group
++
++Type 'bye' to logout
++========================================
++"""
++        self.writer.write(menu)
++        self.writer.write("MAIN_MENU_END\n")
++        self.writer.flush()
++
++    def handle_private_messages(self, input_stream, user_name):
++        """Handle the private messaging flow (existing functionality)"""
++        while True:
++            # Send contact list
++            contact_list = self.send_contact_list()
++
++            # Wait for contact selection
++            selected_contact = input_stream.readline().strip()
++
++            # Handle special commands
++            if selected_contact == "back" or not selected_contact:
++                return  # Return to main menu
++            elif selected_contact == "BROADCAST":
++                # Redirect to broadcast
++                self.handle_broadcast_chat(input_stream, user_name)
++                return
++
++            # Get user_id of selected contact
++            recipient_id = None
++            for uid, uname, _ in self.db_manager.get_all_users():
++                if uname == selected_contact:
++                    recipient_id = uid
++                    break
++
++            if not recipient_id:
++                self.writer.write("CONTACT_NOT_FOUND:Contact not found\n")
++                self.writer.flush()
++                continue
++
++            # Get or create conversation
++            conversation_id = self.db_manager.get_or_create_conversation(self.user_id, recipient_id)
++            if not conversation_id:
++                self.writer.write("CONVERSATION_ERROR:Could not create conversation\n")
++                self.writer.flush()
++                continue
++
++            # Send conversation history
++            self.send_conversation_history(conversation_id, selected_contact)
++
++            # Enter messaging mode
++            self.chat_with_contact(input_stream, user_name, selected_contact, conversation_id)
++
+     def send_contact_list(self):
+         """
+         Send list of all users (contacts) and broadcast option to the client
+@@ -301,10 +349,256 @@ class UserThread(threading.Thread):
+                 self.writer.write(f"SENT:Message saved (recipient offline)\n")
+             self.writer.flush()
+ 
++    # ========== GROUP CHAT METHODS ==========
++
++    def handle_my_groups(self, input_stream, user_name):
++        """Display and handle user's groups"""
++        while True:
++            # Get user's groups
++            groups = self.db_manager.get_user_groups(self.user_id)
++
++            self.writer.write("MY_GROUPS_START\n")
++            self.writer.flush()
++
++            if not groups:
++                self.writer.write("NO_GROUPS:You are not a member of any groups yet.\n")
++                self.writer.flush()
++                self.writer.write("MY_GROUPS_END\n")
++                self.writer.flush()
++                
++                # Wait for user to press enter to go back
++                input_stream.readline()
++                return
++
++            # Display groups
++            for group_id, group_name, description, role, member_count in groups:
++                role_badge = "👑" if role == "admin" else "👤"
++                desc_text = description if description else "No description"
++                self.writer.write(f"{group_id}|{group_name}|{desc_text}|{member_count}|{role_badge}\n")
++                self.writer.flush()
++
++            self.writer.write("MY_GROUPS_END\n")
++            self.writer.flush()
++
++            # Wait for group selection
++            selection = input_stream.readline().strip()
++
++            if selection == "back" or not selection:
++                return  # Return to main menu
++
++            # Try to parse as group ID
++            try:
++                group_id = int(selection)
++                
++                # Verify user is a member
++                if not self.db_manager.is_group_member(group_id, self.user_id):
++                    self.writer.write("NOT_MEMBER:You are not a member of this group\n")
++                    self.writer.flush()
++                    continue
++
++                # Enter group chat
++                self.handle_group_chat(input_stream, user_name, group_id)
++                
++            except ValueError:
++                self.writer.write("INVALID_SELECTION:Please enter a valid group ID\n")
++                self.writer.flush()
++
++    def handle_browse_groups(self, input_stream, user_name):
++        """Display all available groups and allow joining"""
++        while True:
++            # Get all groups
++            all_groups = self.db_manager.get_all_groups()
++            user_groups = [g[0] for g in self.db_manager.get_user_groups(self.user_id)]
++
++            self.writer.write("BROWSE_GROUPS_START\n")
++            self.writer.flush()
++
++            if not all_groups:
++                self.writer.write("NO_GROUPS:No groups available yet. Create one!\n")
++                self.writer.flush()
++                self.writer.write("BROWSE_GROUPS_END\n")
++                self.writer.flush()
++                
++                # Wait for user to press enter to go back
++                input_stream.readline()
++                return
++
++            # Display groups
++            for group_id, group_name, description, member_count in all_groups:
++                is_member = group_id in user_groups
++                status = "✅ Member" if is_member else "Join"
++                desc_text = description if description else "No description"
++                self.writer.write(f"{group_id}|{group_name}|{desc_text}|{member_count}|{status}\n")
++                self.writer.flush()
++
++            self.writer.write("BROWSE_GROUPS_END\n")
++            self.writer.flush()
++
++            # Wait for selection (join or view)
++            selection = input_stream.readline().strip()
++
++            if selection == "back" or not selection:
++                return  # Return to main menu
++
++            # Parse command: "join:GROUP_ID" or just "GROUP_ID" to view
++            if selection.startswith("join:"):
++                try:
++                    group_id = int(selection.split(":")[1])
++                    success, message = self.db_manager.join_group(group_id, self.user_id)
++                    
++                    if success:
++                        self.writer.write(f"JOIN_SUCCESS:{message}\n")
++                    else:
++                        self.writer.write(f"JOIN_FAILED:{message}\n")
++                    self.writer.flush()
++                    
++                except (ValueError, IndexError):
++                    self.writer.write("INVALID_COMMAND:Invalid join command\n")
++                    self.writer.flush()
++            else:
++                # Try to view/enter group
++                try:
++                    group_id = int(selection)
++                    
++                    # Check if user is a member
++                    if self.db_manager.is_group_member(group_id, self.user_id):
++                        self.handle_group_chat(input_stream, user_name, group_id)
++                    else:
++                        self.writer.write("NOT_MEMBER:You must join this group first. Use 'join:GROUP_ID'\n")
++                        self.writer.flush()
++                        
++                except ValueError:
++                    self.writer.write("INVALID_SELECTION:Please enter a valid group ID\n")
++                    self.writer.flush()
++
++    def handle_create_group(self, input_stream, user_name):
++        """Handle group creation"""
++        self.writer.write("CREATE_GROUP_PROMPT\n")
++        self.writer.flush()
++
++        # Get group name
++        group_name = input_stream.readline().strip()
++        
++        if not group_name or group_name == "back":
++            return  # Return to main menu
++
++        # Get description
++        description = input_stream.readline().strip()
++        if description == "back":
++            return
++
++        # Create group
++        success, group_id, message = self.db_manager.create_group(
++            group_name, 
++            self.user_id, 
++            description if description else None
++        )
++
++        if success:
++            self.writer.write(f"CREATE_SUCCESS:{message}|{group_id}\n")
++            self.writer.flush()
++            
++            # Ask if user wants to enter the group
++            enter_choice = input_stream.readline().strip()
++            if enter_choice.lower() == "yes":
++                self.handle_group_chat(input_stream, user_name, group_id)
++        else:
++            self.writer.write(f"CREATE_FAILED:{message}\n")
++            self.writer.flush()
++
++    def handle_group_chat(self, input_stream, user_name, group_id):
++        """
++        Handle group chat messaging
++        """
++        # Get group info
++        group_info = self.db_manager.get_group_info(group_id)
++        if not group_info:
++            self.writer.write("GROUP_NOT_FOUND:Group not found\n")
++            self.writer.flush()
++            return
++
++        group_name = group_info[0]
++
++        # Send group chat history
++        self.send_group_history(group_id, group_name)
++
++        # Get group members for message broadcasting
++        members = self.db_manager.get_group_members(group_id)
++        member_usernames = [m[1] for m in members]
++
++        while True:
++            client_message = input_stream.readline().strip()
++
++            # Commands
++            if not client_message:
++                continue
++            elif client_message == "back":
++                return  # Return to previous menu
++            elif client_message == "/members":
++                # Show group members
++                self.send_group_members(group_id)
++                continue
++            elif client_message == "/leave":
++                # Leave group
++                success, message = self.db_manager.leave_group(group_id, self.user_id)
++                self.writer.write(f"LEAVE_RESULT:{message}\n")
++                self.writer.flush()
++                if success:
++                    return
++                continue
++
++            # Save message to database
++            self.db_manager.save_group_message(group_id, self.user_id, user_name, client_message)
++
++            # Broadcast to all group members who are online (except sender)
++            delivered_count = 0
++            for member_username in member_usernames:
++                if member_username != user_name:
++                    if self.server.send_to_user(
++                        member_username,
++                        f"GROUP_MESSAGE:{group_name}:{user_name}:{client_message}"
++                    ):
++                        delivered_count += 1
++
++            # Confirm to sender
++            self.writer.write(f"GROUP_SENT:Message sent to group\n")
++            self.writer.flush()
++
++    def send_group_history(self, group_id, group_name):
++        """Send group chat history"""
++        messages = self.db_manager.get_group_messages(group_id, limit=50)
++
++        self.writer.write(f"GROUP_CHAT_START:{group_name}:{group_id}\n")
++        self.writer.flush()
++
++        if messages:
++            for sender_username, message_text, timestamp in messages:
++                formatted_msg = f"[{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {sender_username}: {message_text}"
++                self.writer.write(f"{formatted_msg}\n")
++                self.writer.flush()
++
++        self.writer.write("GROUP_CHAT_READY\n")
++        self.writer.flush()
++
++    def send_group_members(self, group_id):
++        """Send list of group members"""
++        members = self.db_manager.get_group_members(group_id)
++        
++        self.writer.write("GROUP_MEMBERS_START\n")
++        self.writer.flush()
++
++        for user_id, username, role, joined_at in members:
++            role_badge = "👑 Admin" if role == "admin" else "👤 Member"
++            self.writer.write(f"{username}|{role_badge}|{joined_at.strftime('%Y-%m-%d')}\n")
++            self.writer.flush()
++
++        self.writer.write("GROUP_MEMBERS_END\n")
++        self.writer.flush()
++
+     def send_message(self, message):
+         """
+         Sends a message to the client.
+         """
+         if self.writer:
+             self.writer.write(message + "\n")
+-            self.writer.flush()
++            self.writer.flush()
+\ No newline at end of file
