@@ -149,3 +149,38 @@ python dashboard.py
 For detailed dashboard documentation, see [DASHBOARD_README.md](DASHBOARD_README.md)
 
 ---
+
+
+
+
+### Script Deployment
+
+  # Terminal 1
+  ./full-deploy.sh
+
+  # After deployment completes, Terminal 2
+  ./start-dashboard.sh
+
+  # Terminal 3-5: Connect 3 clients
+  python3.11 chat_client.py localhost 30080  # alice
+  python3.11 chat_client.py localhost 30080  # bob
+  python3.11 chat_client.py localhost 30080  # carol
+
+  # Terminal 6: Monitor auto-scaling
+  kubectl logs -f deployment/chat-autoscaler -n chat-app
+
+
+ cleanup.sh - Clean up all resources 
+
+  # Basic cleanup (preserves images for quick redeployment)
+  ./cleanup.sh
+
+  # Full cleanup (includes deleting Docker images)
+  ./cleanup.sh --images
+
+  # Force cleanup (skips confirmation prompts)
+  ./cleanup.sh --force
+
+  # Full force cleanup
+  ./cleanup.sh --images --force
+---
