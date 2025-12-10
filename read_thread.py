@@ -1,3 +1,4 @@
+import queue
 import threading
 import socket
 import getpass
@@ -14,6 +15,7 @@ Python port with chat history display, authentication, and group chat UI
 class ReadThread(threading.Thread):
     def __init__(self, client_socket, client):
         super().__init__()
+        self.incoming_queue = queue.Queue()
         self.socket = client_socket
         self.client = client
         self.reader = None
@@ -68,6 +70,10 @@ class ReadThread(threading.Thread):
                             sender = parts[2]
                             text = parts[3]
                             print(f"\n👥 [{group_name}] {sender}: {text}")
+                            print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+                    
+                    print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
+
                     
                     response = self.reader.readline().strip()
                     if not response:
@@ -224,7 +230,7 @@ class ReadThread(threading.Thread):
     def display_broadcast_channel(self):
         """Display broadcast history"""
         print("\n" + "="*60)
-        print("  📢 BROADCAST CHANNEL")
+        print("  BROADCAST CHANNEL")
         print("="*60)
         
         # Read history
