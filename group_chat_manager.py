@@ -254,6 +254,17 @@ class GroupChatManager:
             
             conn.commit()
             self.db_manager.return_connection(conn)
+
+            # 🔥 PUBLISH GROUP MESSAGE EVENT
+            self.redis_manager.publish_message("group_messages", {
+                'event_type': 'group_message',
+                'group_id': group_id,
+                'message_id': message_id,
+                'sender_id': sender_id,
+                'sender_username': sender_username,
+                'message_text': message_text,
+                'timestamp': datetime.utcnow().isoformat()
+            })
             
             return True, message_id
             
