@@ -1,16 +1,14 @@
 import threading
 import socket
 import sys
-import getpass
 import time
 import select
-import platform
+import os
 
 """
 This thread is responsible for reading user's input and send it
 to the server.
 It runs in an infinite loop until the user types 'bye' to quit.
-
 @author www.codejava.net (Java version)
 Python port with authentication support
 """
@@ -18,85 +16,89 @@ Python port with authentication support
 class WriteThread(threading.Thread):
     def __init__(self, client_socket, client):
         super().__init__()
-        self.daemon = True  # Daemon thread - will exit when main thread exits
+        self.daemon = True  # CHANGED BACK: Make it daemon - we can't reliably stop it
         self.socket = client_socket
         self.client = client
         self.writer = None
-
+        self.running = True
+        self._authenticated_event = threading.Event()
+        
         try:
             self.writer = self.socket.makefile('w', encoding='utf-8')
         except IOError as ex:
             print(f"Error getting streams: {ex}")
             import traceback
             traceback.print_exc()
+    
+    def stop(self):
+        """Signal thread to stop"""
+        self.running = False
 
     def run(self):
         # Wait for ReadThread to handle authentication
-        # Don't print anything - let ReadThread handle all UI
-
-        max_wait = 300  # Wait up to 5 minutes for authentication (user might be slow typing)
+        max_wait = 300
         waited = 0
-        while not self.client.is_authenticated() and waited < max_wait:
-            time.sleep(1)
-            waited += 1
-
-        if not self.client.is_authenticated():
-            # Silently exit - ReadThread will show error if needed
+        while not self.client.is_authenticated() and waited < max_wait and self.running:
+            time.sleep(0.1)
+            waited += 0.1
+            
+        if not self.client.is_authenticated() or not self.running:
             return
-
+            
         user_name = self.client.get_user_name()
         if not user_name:
             return
 
-        # Main input loop: send both contact selections and messages
-        while True:
+        # Main input loop
+        while self.running:
             try:
-                # Use select to make input non-blocking, check socket health
-                import select
-                import sys
-
-                # Check if stdin has input (with 0.5s timeout)
-                ready, _, _ = select.select([sys.stdin], [], [], 0.5)
-
+                # Check if socket is still connected before reading input
+                try:
+                    self.socket.getpeername()
+                except:
+                    # Socket disconnected - exit immediately
+                    break
+                
+                # Very short timeout to check socket frequently
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                
                 if ready:
                     text = sys.stdin.readline().rstrip('\n')
-
-                    # Send the input (could be contact name, message, or command)
-                    # Let the server decide what to do with it based on context
-                    self.writer.write(text + "\n")
-                    self.writer.flush()
-
+                    
+                    # Ignore empty input during reconnection
+                    if not text.strip():
+                        continue
+                    
+                    # Check running flag and socket before sending
+                    if not self.running:
+                        break
+                    
+                    # Try to send, but catch all socket errors
+                    try:
+                        self.socket.getpeername()  # Verify still connected
+                        self.writer.write(text + "\n")
+                        self.writer.flush()
+                    except:
+                        # Socket closed during send - exit silently
+                        break
+                    
                     # If user typed 'bye', stop auto-reconnection
                     if text.strip().lower() == "bye":
                         self.client.stop_reconnection()
+                        self.running = False
                         break
-                else:
-                    # No input, check if socket is still alive
-                    try:
-                        # Try to write empty data to check socket health
-                        self.socket.getpeername()  # This will fail if disconnected
-                    except:
-                        # Socket disconnected, exit to trigger reconnect
-                        break
-
-            except EOFError:
+                        
+            except (EOFError, KeyboardInterrupt):
                 self.client.stop_reconnection()
+                self.running = False
                 break
-            except KeyboardInterrupt:
-                # On Ctrl+C, send bye and exit
-                try:
-                    self.writer.write("bye\n")
-                    self.writer.flush()
-                except:
-                    pass
-                self.client.stop_reconnection()
+            except:
+                # Any error - exit silently to trigger reconnect
                 break
-            except IOError:
-                # Socket closed by server (user logged out or disconnected)
-                # Don't stop reconnection here - let auto-reconnect handle it
-                break
-
+        
+        # Cleanup
         try:
-            self.socket.close()
-        except IOError as ex:
-            print(f"Error closing connection: {ex}")
+            if self.writer:
+                self.writer.close()
+        except:
+            pass

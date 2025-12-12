@@ -7,7 +7,6 @@ from write_thread import WriteThread
 """
 This is the chat client program with authentication and auto-reconnection.
 Type 'bye' to terminate the program.
-
 @author www.codejava.net (Java version)
 Python port with authentication support and reconnection
 """
@@ -20,63 +19,129 @@ class ChatClient:
         self.authenticated = False
         self.contacts = []
         self.current_contact = None
-        self.session_token = None  # For reconnection
+        self.session_token = None
         self.should_reconnect = True
         self.client_socket = None
         self.read_thread = None
         self.write_thread = None
+        self.reconnecting = False
 
     def execute(self):
         """Main execution with auto-reconnection support"""
+        first_connect = True
+        
         while self.should_reconnect:
             try:
                 self.connect()
+                first_connect = False
+                
                 # If we reach here, connection was closed normally
                 if not self.should_reconnect:
                     break
-
+                
                 # Connection lost - attempt to reconnect
                 if self.session_token and self.user_name:
-                    print("\n⏳ Reconnecting...", end='', flush=True)
-                    time.sleep(2)  # Wait before reconnecting
+                    print("\n🔄 Reconnecting...", end='', flush=True)
+                    time.sleep(2)
                 else:
                     # No session to resume, exit
                     break
-
+                    
             except socket.gaierror as ex:
                 print(f"Server not found: {ex}")
                 break
             except IOError as ex:
                 # Silent retry for IO errors (network blip)
                 if self.session_token and self.user_name:
-                    print("\n⏳ Reconnecting...", end='', flush=True)
-                    time.sleep(2)
+                    if first_connect:
+                        print(f"Connection failed: {ex}")
+                        break
+                    else:
+                        print("\n🔄 Reconnecting...", end='', flush=True)
+                        time.sleep(2)
                 else:
                     break
             except KeyboardInterrupt:
-                print("\nDisconnected by user")
+                print("\n👋 Disconnected by user")
                 self.should_reconnect = False
                 break
 
     def connect(self):
         """Establish connection to server"""
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect((self.hostname, self.port))
+        # Clean up old threads and socket before reconnecting
+        if self.reconnecting:
+            self.cleanup_old_connection()
+        
+        self.reconnecting = True
+        
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.hostname, self.port))
+            
+            # Only print connection message on first connect (not reconnect)
+            if not self.user_name:
+                print("✓ Connected to the chat server")
+            
+            # Create new threads
+            self.read_thread = ReadThread(self.client_socket, self)
+            self.read_thread.start()
+            
+            self.write_thread = WriteThread(self.client_socket, self)
+            self.write_thread.start()
+            
+            # Reset reconnecting flag
+            self.reconnecting = False
+            
+            # Wait for read thread to complete
+            self.read_thread.join()
+            
+        except Exception as e:
+            self.reconnecting = False
+            raise e
 
-        # Only print connection message on first connect (not reconnect)
-        if not self.user_name:
-            print("✓ Connected to the chat server")
+    def cleanup_old_connection(self):
+        """Properly stop old threads and close socket before reconnecting"""
 
-        self.read_thread = ReadThread(self.client_socket, self)
-        self.read_thread.start()
+        # Signal threads to stop
+        if self.read_thread:
+            self.read_thread.stop()
+        if self.write_thread:
+            self.write_thread.stop()
+    
+        # Force close socket - this will make both threads exit
+        if self.client_socket:
+            try:
+                self.client_socket.shutdown(socket.SHUT_RDWR)
+            except:
+                pass
+            try:
+                self.client_socket.close()
+            except:
+                pass
+    
+        # Brief wait for read thread (write thread is daemon, will be abandoned)
+        if self.read_thread and self.read_thread.is_alive():
+            self.read_thread.join(timeout=1.0)
+        
+        # Don't wait for write_thread - it's stuck on stdin and will be orphaned
+        # The new write_thread will take over stdin handling
+        
+        # Clear references
+        self.read_thread = None
+        self.write_thread = None
+        self.client_socket = None
+        
+        # Flush stdin to clear any pending input
+        self.flush_stdin()
 
-        self.write_thread = WriteThread(self.client_socket, self)
-        self.write_thread.start()
-
-        # Wait for read thread to complete (write thread is daemon, will auto-exit)
-        self.read_thread.join()
-        # Don't wait for write_thread - it's a daemon and will exit when read_thread exits
-
+    def flush_stdin(self):
+        """Flush any pending input from stdin"""
+        import sys
+        import select
+        
+        # Clear any buffered input
+        while select.select([sys.stdin], [], [], 0)[0]:
+            sys.stdin.readline()  # Discard the line
     def set_user_name(self, user_name):
         self.user_name = user_name
 
@@ -113,7 +178,6 @@ class ChatClient:
         """Stop auto-reconnection (on clean exit)"""
         self.should_reconnect = False
 
-
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Syntax: python chat_client.py <hostname> <port-number>")
@@ -121,6 +185,6 @@ if __name__ == "__main__":
 
     hostname = sys.argv[1]
     port = int(sys.argv[2])
-
+    
     client = ChatClient(hostname, port)
     client.execute()

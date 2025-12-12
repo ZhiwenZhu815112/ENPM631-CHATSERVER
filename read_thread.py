@@ -20,6 +20,7 @@ class ReadThread(threading.Thread):
         self.client = client
         self.reader = None
         self.writer = None
+        self.running = True
 
         try:
             self.reader = self.socket.makefile('r', encoding='utf-8')
@@ -28,6 +29,10 @@ class ReadThread(threading.Thread):
             print(f"Error getting input stream: {ex}")
             import traceback
             traceback.print_exc()
+
+    def stop(self):
+        """Signal thread to stop"""
+        self.running = False
 
     def run(self):
         # First, handle authentication
@@ -40,7 +45,7 @@ class ReadThread(threading.Thread):
             return
 
         # Main loop: message-driven, always wait for server
-        while True:
+        while self.running:
             try:
                 response = self.reader.readline().strip()
 
@@ -172,11 +177,18 @@ class ReadThread(threading.Thread):
                     
                 # Ignore other messages or handle as needed
                     
+            except (ConnectionResetError, BrokenPipeError, OSError) as ex:
+                # Don't print error for expected connection resets
+                # These are normal during pod scale-down/reconnection
+                if self.running:
+                    print("\n⚠️  Connection lost", flush=True)
+                return
+                
             except IOError as ex:
-                print(f"Error communicating with server: {ex}")
-                import traceback
-                traceback.print_exc()
-                break
+                # Only print error if we're supposed to be running
+                if self.running:
+                    print(f"\n⚠️  Connection error: {ex}", flush=True)
+                return
 
     def display_main_menu(self):
         """Display the main menu sent by server"""
@@ -312,10 +324,6 @@ class ReadThread(threading.Thread):
         print("="*60)
         print("Enter group name (or 'back' to cancel):")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-        
-        # Server will wait for name, then description
-        # After we get the name response, we need to prompt for description
-        # But this will be handled by the next message from server
 
     def display_group_chat_header(self, group_name):
         """Display group chat header and history"""
@@ -362,8 +370,6 @@ class ReadThread(threading.Thread):
             # Check if we have a session token to resume
             session_token = self.client.get_session_token()
             if session_token and self.client.get_user_name():
-                # Silently resume session - don't show technical details
-
                 # Send RESUME_SESSION command
                 self.writer.write(f"RESUME_SESSION:{session_token}\n")
                 self.writer.flush()
@@ -372,8 +378,8 @@ class ReadThread(threading.Thread):
                 response = self.reader.readline().strip()
 
                 if response.startswith("SESSION_RESUMED"):
-                    # Clear the "Reconnecting..." message
-                    print(f"\r✓ Connected          \n", end='', flush=True)
+                    # Clear the "Reconnecting..." message and show success
+                    print(f"\r✅ Reconnected! Press Enter to continue...     \n", flush=True)
 
                     # Read session token (should be same)
                     token_line = self.reader.readline().strip()
@@ -382,8 +388,16 @@ class ReadThread(threading.Thread):
                         self.client.set_session_token(new_token)
 
                     self.client.set_authenticated(True)
-                    # Don't call receive_pending_messages here - let main loop handle it
-                    # The server will send PENDING_MESSAGES_START if there are any
+                    
+                    # CRITICAL: Flush stdin to discard any input captured during reconnection
+                    import sys
+                    import select
+                    print("\n(Clearing input buffer...)", flush=True)
+                    while select.select([sys.stdin], [], [], 0)[0]:
+                        discarded = sys.stdin.readline()
+                        if discarded.strip():
+                            print(f"(Discarded stray input: '{discarded.strip()}')", flush=True)
+                    
                     return True
 
                 elif response.startswith("AUTH_FAILED"):
