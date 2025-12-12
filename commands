@@ -1,0 +1,5 @@
+kubectl exec -n chat-app -it $(kubectl get pod -n chat-app -l app=redis -o jsonpath='{.items[0].metadata.name}') -- redis-cli
+
+SMEMBERS online_users
+
+GET online_user:

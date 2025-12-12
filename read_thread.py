@@ -43,11 +43,10 @@ class ReadThread(threading.Thread):
         while True:
             try:
                 response = self.reader.readline().strip()
-                
+
                 if not response:
-                    print("\n\n👋 Disconnected from server. Goodbye!")
-                    import sys
-                    sys.exit(0)
+                    # Connection closed - return to trigger reconnection
+                    return
                 
                 # Handle incoming notifications (can arrive anytime)
                 while response.startswith("MESSAGE:") or response.startswith("BROADCAST:") or response.startswith("GROUP_MESSAGE:"):
@@ -77,11 +76,15 @@ class ReadThread(threading.Thread):
                     
                     response = self.reader.readline().strip()
                     if not response:
-                        import sys
-                        sys.exit(0)
+                        # Connection closed - return to trigger reconnection
+                        return
                 
                 # Route based on server's protocol message
-                if response == "MAIN_MENU_START":
+                if response.startswith("PENDING_MESSAGES_START"):
+                    # Handle pending messages from reconnection
+                    self.display_pending_messages(response)
+
+                elif response == "MAIN_MENU_START":
                     # Display main menu
                     self.display_main_menu()
                     
@@ -348,13 +351,46 @@ class ReadThread(threading.Thread):
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
     def handle_authentication(self):
-        """Handle the complete authentication flow"""
+        """Handle the complete authentication flow with reconnection support"""
         try:
             # Wait for AUTH_REQUEST from server
             auth_request = self.reader.readline().strip()
             if auth_request != "AUTH_REQUEST":
                 print(f"Unexpected server response: {auth_request}")
                 return False
+
+            # Check if we have a session token to resume
+            session_token = self.client.get_session_token()
+            if session_token and self.client.get_user_name():
+                # Silently resume session - don't show technical details
+
+                # Send RESUME_SESSION command
+                self.writer.write(f"RESUME_SESSION:{session_token}\n")
+                self.writer.flush()
+
+                # Wait for result
+                response = self.reader.readline().strip()
+
+                if response.startswith("SESSION_RESUMED"):
+                    # Clear the "Reconnecting..." message
+                    print(f"\r✓ Connected          \n", end='', flush=True)
+
+                    # Read session token (should be same)
+                    token_line = self.reader.readline().strip()
+                    if token_line.startswith("SESSION_TOKEN:"):
+                        new_token = token_line.split(":", 1)[1]
+                        self.client.set_session_token(new_token)
+
+                    self.client.set_authenticated(True)
+                    # Don't call receive_pending_messages here - let main loop handle it
+                    # The server will send PENDING_MESSAGES_START if there are any
+                    return True
+
+                elif response.startswith("AUTH_FAILED"):
+                    message = response.split(":", 1)[1] if ":" in response else "Session expired"
+                    print(f"⚠️ {message}")
+                    print("Please log in again.\n")
+                    # Fall through to normal login
 
             # Show authentication menu
             print("\n=== Chat Application Authentication ===")
@@ -382,6 +418,30 @@ class ReadThread(threading.Thread):
             import traceback
             traceback.print_exc()
             return False
+
+    def display_pending_messages(self, first_line):
+        """Display pending messages from server (called from main loop)"""
+        try:
+            # first_line is "PENDING_MESSAGES_START:count"
+            count = int(first_line.split(":", 1)[1])
+            if count > 0:
+                print(f"\n📬 You have {count} message(s) received while offline:\n")
+
+                for i in range(count):
+                    msg_line = self.reader.readline().strip()
+                    if msg_line.startswith("PENDING_MSG:"):
+                        message = msg_line.split(":", 1)[1]
+                        print(f"  {message}")
+
+                # Read end marker
+                self.reader.readline()  # PENDING_MESSAGES_END
+                print()
+            else:
+                # No messages, just read the end marker
+                self.reader.readline()  # PENDING_MESSAGES_END
+
+        except Exception as e:
+            print(f"Error displaying pending messages: {e}")
 
     def do_login(self):
         """Handle login process"""
@@ -415,6 +475,14 @@ class ReadThread(threading.Thread):
                 print(f"\n{message}\n")
                 self.client.set_user_name(username)
                 self.client.set_authenticated(True)
+
+                # Read session token for reconnection
+                token_line = self.reader.readline().strip()
+                if token_line.startswith("SESSION_TOKEN:"):
+                    token = token_line.split(":", 1)[1]
+                    self.client.set_session_token(token)
+                    print(f"✓ Session established (reconnection enabled)\n")
+
                 return True
             elif response.startswith("AUTH_FAILED"):
                 message = response.split(":", 1)[1] if ":" in response else "Login failed"
@@ -487,6 +555,14 @@ class ReadThread(threading.Thread):
                 print(f"\n{message}\n")
                 self.client.set_user_name(username)
                 self.client.set_authenticated(True)
+
+                # Read session token for reconnection
+                token_line = self.reader.readline().strip()
+                if token_line.startswith("SESSION_TOKEN:"):
+                    token = token_line.split(":", 1)[1]
+                    self.client.set_session_token(token)
+                    print(f"✓ Session established (reconnection enabled)\n")
+
                 return True
             elif response.startswith("AUTH_FAILED"):
                 message = response.split(":", 1)[1] if ":" in response else "Registration failed"

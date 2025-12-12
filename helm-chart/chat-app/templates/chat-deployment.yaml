@@ -15,8 +15,7 @@ spec:
     - protocol: TCP
       port: 8080
       targetPort: 8080
-      nodePort: 30080
-  type: NodePort
+  type: LoadBalancer
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -61,6 +60,7 @@ spec:
             sleep 2
           done
           echo "Redis is ready!"
+      terminationGracePeriodSeconds: 60  # Give users time to reconnect during scale down
       containers:
       - name: chat-server
         image: "chat-server:latest"
@@ -68,6 +68,75 @@ spec:
         ports:
         - containerPort: 8080
           name: chat
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                # Step 1: Notify users and trigger graceful reconnection
+                python3 -c "
+                import redis
+                import json
+                import os
+                import time
+                import signal
+
+                redis_host = os.getenv('REDIS_HOST', 'redis-service.chat-app.svc.cluster.local')
+                redis_port = int(os.getenv('REDIS_PORT', '6379'))
+                server_id = os.getenv('HOSTNAME', 'unknown')
+
+                try:
+                    r = redis.Redis(host=redis_host, port=redis_port, decode_responses=True, socket_timeout=5)
+
+                    # Get users on this pod
+                    online_users = r.smembers('online_users')
+                    users_on_this_pod = []
+
+                    for username in online_users:
+                        user_key = f'online_user:{username}'
+                        user_data = r.get(user_key)
+                        if user_data:
+                            info = json.loads(user_data)
+                            if info.get('server_id') == server_id:
+                                users_on_this_pod.append(username)
+
+                    print(f'🔄 PreStop: Found {len(users_on_this_pod)} users on this pod')
+
+                    # Send shutdown notification to these users via Redis pub/sub
+                    for username in users_on_this_pod:
+                        msg_data = {
+                            'target_username': username,
+                            'message': '🔄 Server maintenance: Reconnecting to another server...',
+                            'sender_server_id': server_id
+                        }
+                        r.publish('chat_messages', json.dumps(msg_data))
+                        print(f'  ✓ Notified {username}')
+
+                    # Wait for notification delivery
+                    time.sleep(2)
+                    print(f'✅ Notifications sent to {len(users_on_this_pod)} users')
+
+                    # Step 2: Force close all TCP connections to trigger immediate client reconnection
+                    # Kill the server process - this will immediately close all sockets
+                    print('🛑 Terminating server process to close all connections...')
+
+                    # Use pkill to find and kill the Python chat server process
+                    # This is more reliable than sending SIGTERM to PID 1
+                    import subprocess
+                    subprocess.run(['pkill', '-9', '-f', 'chat_server.py'], check=False)
+
+                    # Give clients a moment to detect disconnection and start reconnecting
+                    print('⏳ Waiting 5s for clients to reconnect to other pods...')
+                    time.sleep(5)
+
+                    print('✅ PreStop complete - users should be reconnected')
+                except Exception as e:
+                    print(f'❌ Error in preStop hook: {e}')
+                    import traceback
+                    traceback.print_exc()
+                "
         env:
         - name: DB_HOST
           valueFrom:

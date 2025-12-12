@@ -3,6 +3,7 @@ import sys
 import os
 import threading
 import json
+import signal
 from user_thread import UserThread
 from db_manager import DatabaseManager
 from redis_manager import RedisManager
@@ -45,6 +46,45 @@ class ChatServer:
         # Start Redis pub/sub listener for inter-pod messaging
         self.pubsub_thread = None
         self._start_message_listener()
+
+        # Graceful shutdown flag
+        self.shutting_down = False
+
+        # Setup signal handlers for graceful shutdown
+        signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
+        signal.signal(signal.SIGINT, self._handle_shutdown_signal)
+
+    def _handle_shutdown_signal(self, signum, frame):
+        """Handle SIGTERM/SIGINT for graceful shutdown"""
+        signal_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+        print(f"\n[{self.server_id}] 🛑 Received {signal_name} - initiating graceful shutdown...")
+        self.shutting_down = True
+
+        # Close all client connections to trigger auto-reconnect
+        self._close_all_connections()
+
+        # Exit gracefully
+        print(f"[{self.server_id}] ✅ Graceful shutdown complete")
+        sys.exit(0)
+
+    def _close_all_connections(self):
+        """Close all user connections gracefully"""
+        print(f"[{self.server_id}] 🔌 Closing {len(self.user_threads)} user connections...")
+
+        # Make a copy to avoid modification during iteration
+        user_threads_copy = list(self.user_threads)
+
+        for user_thread in user_threads_copy:
+            try:
+                # Close the socket - this will trigger IOError in UserThread
+                # which will then clean up via the finally block
+                if hasattr(user_thread, 'socket') and user_thread.socket:
+                    user_thread.socket.close()
+                    print(f"  ✓ Closed connection for user thread")
+            except Exception as e:
+                print(f"  ⚠️  Error closing connection: {e}")
+
+        print(f"[{self.server_id}] ✅ All connections closed")
 
     def _start_message_listener(self):
         """Start listening for messages from other pods via Redis pub/sub"""
@@ -107,9 +147,17 @@ class ChatServer:
         Send a message to a specific user by username
         Uses Redis pub/sub to route messages across pods
         Returns True if user is online (in Redis), False otherwise
+        If user is offline but has a valid session, saves message as pending
         """
         # Check if user is online (in Redis global state)
         if not self.redis_manager.is_user_online(recipient_username):
+            # User is offline - check if they have an active session
+            session_token = self.redis_manager.get_session_by_username(recipient_username)
+            if session_token:
+                # Save as pending message for when they reconnect
+                self.redis_manager.save_pending_message(recipient_username, message)
+                print(f"[{self.server_id}] Saved pending message for offline user {recipient_username}")
+                return True
             return False
 
         # If user is on THIS pod, send directly

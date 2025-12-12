@@ -16,10 +16,13 @@ class UserThread(threading.Thread):
         self.server = server
         self.writer = None
         self.db_manager = server.get_db_manager()
+        self.redis_manager = server.redis_manager
         self.user_id = None
         self.session_id = None
+        self.reconnect_token = None  # Redis session token for reconnection
 
     def run(self):
+        user_name = None
         try:
             input_stream = self.socket.makefile('r', encoding='utf-8')
             output_stream = self.socket.makefile('w', encoding='utf-8')
@@ -61,25 +64,31 @@ class UserThread(threading.Thread):
                 elif menu_choice == "bye":
                     break
                 elif not menu_choice:
-                    continue
+                    # Empty response means socket closed
+                    break
                 else:
                     self.writer.write("INVALID_OPTION:Invalid menu option\n")
                     self.writer.flush()
-
-            # Cleanup
-            if self.session_id:
-                self.db_manager.end_session(self.session_id)
-            self.server.remove_user(user_name, self)
-            self.socket.close()
 
         except IOError as ex:
             print(f"Error in UserThread: {ex}")
             import traceback
             traceback.print_exc()
+        finally:
+            # Cleanup ALWAYS happens, whether normal exit or exception
+            if user_name:
+                self.server.remove_user(user_name, self)
+                print(f"Cleaned up user {user_name} from online list and Redis")
+            if self.session_id:
+                self.db_manager.end_session(self.session_id)
+            try:
+                self.socket.close()
+            except:
+                pass
 
     def authenticate_user(self, input_stream):
         """
-        Handle user authentication (login or signup)
+        Handle user authentication (login, signup, or session resume)
         Returns username if successful, None otherwise
         """
         try:
@@ -93,6 +102,15 @@ class UserThread(threading.Thread):
 
                 if not auth_choice:
                     return None
+
+                # Check for session resume request
+                if auth_choice.startswith("RESUME_SESSION:"):
+                    session_token = auth_choice.split(":", 1)[1]
+                    result = self.handle_session_resume(session_token)
+                    if result:
+                        return result
+                    # If resume fails, fall through to normal auth
+                    continue
 
                 if auth_choice == "LOGIN":
                     result = self.handle_login(input_stream)
@@ -125,9 +143,15 @@ class UserThread(threading.Thread):
         if success:
             self.user_id = user_id
             self.session_id = self.db_manager.create_session(user_id)
+
+            # Create Redis session for reconnection
+            self.reconnect_token = self.redis_manager.create_session(username, user_id)
+
+            # Send success with reconnection token
             self.writer.write(f"AUTH_SUCCESS:{message}\n")
+            self.writer.write(f"SESSION_TOKEN:{self.reconnect_token}\n")
             self.writer.flush()
-            print(f"User {username} logged in successfully")
+            print(f"User {username} logged in successfully (session: {self.reconnect_token})")
             return username
         else:
             self.writer.write(f"AUTH_FAILED:{message}\n")
@@ -149,12 +173,87 @@ class UserThread(threading.Thread):
             _, user_id, _ = self.db_manager.authenticate_user(username, password)
             self.user_id = user_id
             self.session_id = self.db_manager.create_session(user_id)
+
+            # Create Redis session for reconnection
+            self.reconnect_token = self.redis_manager.create_session(username, user_id)
+
+            # Send success with reconnection token
             self.writer.write(f"AUTH_SUCCESS:Registration successful. Welcome {username}!\n")
+            self.writer.write(f"SESSION_TOKEN:{self.reconnect_token}\n")
             self.writer.flush()
-            print(f"New user {username} registered and logged in")
+            print(f"New user {username} registered and logged in (session: {self.reconnect_token})")
             return username
         else:
             self.writer.write(f"AUTH_FAILED:{message}\n")
+            self.writer.flush()
+            return None
+
+    def handle_session_resume(self, session_token):
+        """
+        Handle session resumption using reconnection token
+        Returns username if successful, None otherwise
+        """
+        try:
+            # Validate session token
+            session_data = self.redis_manager.get_session(session_token)
+            if not session_data:
+                self.writer.write("AUTH_FAILED:Invalid or expired session\n")
+                self.writer.flush()
+                print(f"Session resume failed: invalid token {session_token}")
+                return None
+
+            username = session_data.get('username')
+            user_id = session_data.get('user_id')
+
+            if not username or not user_id:
+                self.writer.write("AUTH_FAILED:Invalid session data\n")
+                self.writer.flush()
+                return None
+
+            # IMPORTANT: Clean up any stale online_user entry from previous connection
+            # This handles the case where cleanup didn't complete during pod termination
+            self.redis_manager.remove_online_user(username)
+            print(f"Cleaned up stale entry for {username} before resume")
+
+            # Restore user state
+            self.user_id = user_id
+            self.reconnect_token = session_token
+            self.session_id = self.db_manager.create_session(user_id)
+
+            # Update session heartbeat
+            self.redis_manager.update_session_heartbeat(session_token)
+
+            # Send success
+            self.writer.write(f"SESSION_RESUMED:Welcome back, {username}!\n")
+            self.writer.write(f"SESSION_TOKEN:{session_token}\n")
+            self.writer.flush()
+
+            # Retrieve and send pending messages (ALWAYS send, even if count=0)
+            pending_messages = self.redis_manager.get_pending_messages(username, clear=True)
+            count = len(pending_messages) if pending_messages else 0
+
+            self.writer.write(f"PENDING_MESSAGES_START:{count}\n")
+            self.writer.flush()
+
+            if count > 0:
+                for msg_data in pending_messages:
+                    content = msg_data.get('content', '')
+                    timestamp = msg_data.get('timestamp', '')
+                    self.writer.write(f"PENDING_MSG:{content}\n")
+                    self.writer.flush()
+
+            self.writer.write("PENDING_MESSAGES_END\n")
+            self.writer.flush()
+
+            if count > 0:
+                print(f"Sent {count} pending messages to {username}")
+
+            print(f"User {username} resumed session {session_token}")
+            return username
+
+        except Exception as e:
+            print(f"Error resuming session: {e}")
+            self.writer.write("AUTH_FAILED:Error resuming session\n")
             self.writer.flush()
             return None
 
