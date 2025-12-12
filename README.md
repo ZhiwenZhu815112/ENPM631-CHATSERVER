@@ -32,19 +32,17 @@ python3 chat_client.py localhost 30080
 - [🧪 Testing Guide](docs/testing.md) - Load testing procedures
 
 ## 🏗️ Architecture
-┌─────────────────────────────────────┐
-│      Kubernetes Cluster             │
-│  ┌──────────┐  ┌──────────┐         │
-│  │Chat Pod 1│  │Chat Pod N│ (1-10)  │
-│  └────┬─────┘  └────┬─────┘         │
-│       └──────┬───────┘              │
-│         ┌────▼─────┐                │
-│         │  Redis   │ (state)        │
-│         └────┬─────┘                │
-│         ┌────▼─────┐                │
-│         │PostgreSQL│ (data)         │
-│         └──────────┘                │
-└─────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph K8s["Kubernetes Cluster"]
+        P1["Chat Pod 1"]
+        PN["Chat Pod N (1–10)"]
+        P1 --> R
+        PN --> R
+        R["Redis (state)"] --> DB["PostgreSQL (data)"]
+    end
+```
+
 
 **Components:**
 - **Chat Server** (`chat_server.py`) - Multi-threaded message handling
@@ -131,6 +129,7 @@ kubectl logs -f deployment/chat-autoscaler -n chat-app
 
 
 # Manual testing
+```
 python3 chat_client.py localhost 8080 # Terminal 1 (alice)
 python3 chat_client.py localhost 8080  # Terminal 2 (bob)
 ```
@@ -167,23 +166,26 @@ See [Testing Guide](docs/testing.md) for comprehensive tests.
 - Kubernetes preStop hook (graceful shutdown)
 
 ## 📂 Project Structure
-├── README.md              # This file
-├── docs/                  # Documentation
+```text
+📦 Project
+├── README.md               # This file
+├── docs/                   # Documentation
 │   ├── dashboard.md
 │   ├── deployment.md
 │   └── testing.md
-├── scripts/               # Deployment scripts
+├── scripts/                # Deployment scripts
 │   ├── full-deploy.sh
 │   ├── cleanup.sh
 │   └── ...
-├── helm-chart/            # Kubernetes charts
-├── chat_server.py         # Main server
-├── chat_client.py         # Client app
-├── autoscaler.py          # Autoscaler
-├── dashboard.py           # Monitoring
-├── *_manager.py           # DB/Redis/Group managers
-├── *_thread.py            # Threading components
-└── requirements.txt       # Dependencies
+├── helm-chart/             # Kubernetes Helm charts
+├── chat_server.py          # Main server
+├── chat_client.py          # Client application
+├── autoscaler.py           # Autoscaler logic
+├── dashboard.py            # Monitoring dashboard
+├── *_manager.py            # DB / Redis / Group managers
+├── *_thread.py             # Threading components
+└── requirements.txt        # Python dependencies
+```
 
 
 ## 👥 Contributors
@@ -197,5 +199,6 @@ See [Testing Guide](docs/testing.md) for comprehensive tests.
 This project is for educational purposes (ENPM631 - University of Maryland).
 
 ---
+
 
 **Questions?** Open an [issue](https://github.com/ZhiwenZhu815112/ENPM631-CHATSERVER/issues) or check the [docs](docs/).
