@@ -37,14 +37,14 @@ if ! command -v kubectl >/dev/null 2>&1; then
     exit 1
 fi
 
-# Check if python3.11 is available
-if ! command -v python3.11 >/dev/null 2>&1; then
-    echo -e "${RED}✗ python3.11 not found. Please install Python 3.11+${NC}"
+# Check if python3.12 is available
+if ! command -v python3.12 >/dev/null 2>&1; then
+    echo -e "${RED}✗ python3.12 not found. Please install Python 3.12+${NC}"
     exit 1
 fi
 
 # Check if dashboard.py exists
-if [ ! -f "dashboard.py" ]; then
+if [ ! -f "../dashboard.py" ]; then
     echo -e "${RED}✗ dashboard.py not found in current directory${NC}"
     exit 1
 fi
@@ -165,6 +165,6 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo ""
 
 # Start dashboard (this will run in foreground)
-python3.11 dashboard.py
+python3.12 ./dashboard.py
 
 # Cleanup will be called automatically on exit

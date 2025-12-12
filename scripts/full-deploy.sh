@@ -35,7 +35,7 @@ echo ""
 echo -e "${YELLOW}[1/8]${NC} Checking prerequisites..."
 MISSING_TOOLS=0
 
-for cmd in kubectl helm docker python3.11; do
+for cmd in kubectl helm docker python3.12; do
     if ! command -v $cmd >/dev/null 2>&1; then
         echo -e "${RED}✗ Missing: $cmd${NC}"
         MISSING_TOOLS=1
