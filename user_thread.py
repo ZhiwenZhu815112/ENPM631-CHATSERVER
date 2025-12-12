@@ -64,8 +64,8 @@ class UserThread(threading.Thread):
                 elif menu_choice == "bye":
                     break
                 elif not menu_choice:
-                    # Empty response means socket closed
-                    break
+                    # Empty input - just re-display menu (user pressed Enter)
+                    continue
                 else:
                     self.writer.write("INVALID_OPTION:Invalid menu option\n")
                     self.writer.flush()
@@ -381,8 +381,11 @@ Type 'bye' to logout
             client_message = input_stream.readline().strip()
 
             # Check for exit command to return to contact list
-            if not client_message or client_message == "back":
+            if client_message == "back":
                 return
+            if not client_message:
+                # Empty input - ignore and wait for next message
+                continue
 
             # Save broadcast message to database
             self.db_manager.save_broadcast_message(self.user_id, user_name, client_message)
@@ -428,9 +431,12 @@ Type 'bye' to logout
             # Check for exit command to return to contact list
             # Note: "bye" is treated as a regular message here (user can say "bye" to their friend)
             # To logout, user should type "back" then "bye" at contact selection
-            if not client_message or client_message == "back":
+            if client_message == "back":
                 # Return to contact selection
                 return
+            if not client_message:
+                # Empty input - ignore and wait for next message
+                continue
 
             # Save message to database
             self.db_manager.save_private_message(conversation_id, self.user_id, user_name, client_message)

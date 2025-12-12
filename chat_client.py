@@ -25,6 +25,7 @@ class ChatClient:
         self.client_socket = None
         self.read_thread = None
         self.write_thread = None
+        self.in_contact_selection = False  # Track if in contact selection mode
 
     def execute(self):
         """Main execution with auto-reconnection support"""
@@ -60,6 +61,29 @@ class ChatClient:
 
     def connect(self):
         """Establish connection to server"""
+        # Signal old write_thread to stop if it exists
+        if self.write_thread:
+            self.write_thread.stop()
+
+        # Close old socket if it exists to ensure old threads exit
+        if self.client_socket:
+            try:
+                self.client_socket.close()
+            except:
+                pass
+
+        # If reconnecting, wait for old write_thread to finish (max 1 second)
+        if self.write_thread and self.write_thread.is_alive():
+            self.write_thread.join(timeout=1.0)
+            if self.write_thread.is_alive():
+                # Old thread still running - this shouldn't happen but log it
+                print("Warning: Old write thread still running")
+
+        # Reset client state for clean reconnection
+        self.contacts = []
+        self.current_contact = None
+        self.in_contact_selection = False
+
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.connect((self.hostname, self.port))
 
@@ -112,6 +136,14 @@ class ChatClient:
     def stop_reconnection(self):
         """Stop auto-reconnection (on clean exit)"""
         self.should_reconnect = False
+
+    def set_in_contact_selection(self, status):
+        """Set whether user is in contact selection mode"""
+        self.in_contact_selection = status
+
+    def is_in_contact_selection(self):
+        """Check if user is in contact selection mode"""
+        return self.in_contact_selection
 
 
 if __name__ == "__main__":

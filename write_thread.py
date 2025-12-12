@@ -22,6 +22,7 @@ class WriteThread(threading.Thread):
         self.socket = client_socket
         self.client = client
         self.writer = None
+        self.should_stop = False  # Flag to signal thread to stop
 
         try:
             self.writer = self.socket.makefile('w', encoding='utf-8')
@@ -29,6 +30,10 @@ class WriteThread(threading.Thread):
             print(f"Error getting streams: {ex}")
             import traceback
             traceback.print_exc()
+
+    def stop(self):
+        """Signal the thread to stop gracefully"""
+        self.should_stop = True
 
     def run(self):
         # Wait for ReadThread to handle authentication
@@ -51,6 +56,10 @@ class WriteThread(threading.Thread):
         # Main input loop: send both contact selections and messages
         while True:
             try:
+                # Check if we should stop (reconnection happening)
+                if self.should_stop:
+                    break
+
                 # Use select to make input non-blocking, check socket health
                 import select
                 import sys
@@ -60,6 +69,14 @@ class WriteThread(threading.Thread):
 
                 if ready:
                     text = sys.stdin.readline().rstrip('\n')
+
+                    # Only convert numbers to names when in contact selection mode
+                    if self.client.is_in_contact_selection() and text.strip().isdigit():
+                        contacts = self.client.get_contacts()
+                        if contacts:
+                            num = int(text.strip())
+                            if 1 <= num <= len(contacts):
+                                text = contacts[num - 1]  # Convert to contact name
 
                     # Send the input (could be contact name, message, or command)
                     # Let the server decide what to do with it based on context
@@ -71,12 +88,13 @@ class WriteThread(threading.Thread):
                         self.client.stop_reconnection()
                         break
                 else:
-                    # No input, check if socket is still alive
+                    # No input - check if socket is still valid
+                    # This helps detect when we need to exit for reconnection
                     try:
-                        # Try to write empty data to check socket health
-                        self.socket.getpeername()  # This will fail if disconnected
-                    except:
-                        # Socket disconnected, exit to trigger reconnect
+                        # Try a non-blocking check
+                        self.socket.getpeername()
+                    except (OSError, socket.error):
+                        # Socket closed - exit immediately
                         break
 
             except EOFError:
@@ -91,9 +109,9 @@ class WriteThread(threading.Thread):
                     pass
                 self.client.stop_reconnection()
                 break
-            except IOError:
-                # Socket closed by server (user logged out or disconnected)
-                # Don't stop reconnection here - let auto-reconnect handle it
+            except (IOError, OSError, socket.error):
+                # Socket closed by server or reconnection in progress
+                # Exit immediately to allow new write_thread to take over
                 break
 
         try:

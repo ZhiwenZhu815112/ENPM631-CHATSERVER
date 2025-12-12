@@ -180,6 +180,7 @@ class ReadThread(threading.Thread):
 
     def display_main_menu(self):
         """Display the main menu sent by server"""
+        self.client.set_in_contact_selection(False)  # Disable number conversion
         while True:
             line = self.reader.readline().strip()
             if line == "MAIN_MENU_END":
@@ -210,58 +211,62 @@ class ReadThread(threading.Thread):
 
         print("="*60)
         self.client.set_contacts(contacts)
+        self.client.set_in_contact_selection(True)  # Enable number conversion
         print("Enter contact name, 'back' for main menu, or 'bye' to exit:")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
     def display_conversation_header(self, contact_name):
         """Display conversation header and history"""
+        self.client.set_in_contact_selection(False)  # Disable number conversion in chat
         print("\n" + "="*60)
         print(f"  CONVERSATION WITH {contact_name}")
         print("="*60)
-        
+
         # Display history
         while True:
             line = self.reader.readline().strip()
             if line == "CONVERSATION_READY":
                 break
             print(line)
-        
+
         print("="*60)
         print("Type 'back' to return to contacts, or start chatting:")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
     def display_broadcast_channel(self):
         """Display broadcast history"""
+        self.client.set_in_contact_selection(False)  # Disable number conversion in broadcast
         print("\n" + "="*60)
         print("  BROADCAST CHANNEL")
         print("="*60)
-        
+
         # Read history
         while True:
             line = self.reader.readline().strip()
             if line == "CONVERSATION_READY":
                 break
             print(line)
-        
+
         print("="*60)
         print("Type 'back' to return to main menu, or start chatting:")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
     def display_my_groups(self):
         """Display my groups"""
+        self.client.set_in_contact_selection(False)  # Groups use IDs, not list numbers
         next_line = self.reader.readline().strip()
-        
+
         if next_line.startswith("NO_GROUPS:"):
             message = next_line.split(":", 1)[1]
             print(f"\n{message}")
             self.reader.readline()  # MY_GROUPS_END
             print(f"\n[{self.client.get_user_name()}]: Press Enter to return to main menu...", end='', flush=True)
             return
-        
+
         print("\n" + "="*60)
         print("  👥 MY GROUPS")
         print("="*60)
-        
+
         line = next_line
         while line != "MY_GROUPS_END":
             if "|" in line:
@@ -271,26 +276,27 @@ class ReadThread(threading.Thread):
                     print(f"{group_id}. {role} {name} ({members} members)")
                     print(f"   {desc}")
             line = self.reader.readline().strip()
-        
+
         print("="*60)
         print("Enter group ID to open, or 'back' to return to main menu:")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
     def display_browse_groups(self):
         """Display all groups"""
+        self.client.set_in_contact_selection(False)  # Groups use IDs, not list numbers
         next_line = self.reader.readline().strip()
-        
+
         if next_line.startswith("NO_GROUPS:"):
             message = next_line.split(":", 1)[1]
             print(f"\n{message}")
             self.reader.readline()  # BROWSE_GROUPS_END
             print(f"\n[{self.client.get_user_name()}]: Press Enter to return to main menu...", end='', flush=True)
             return
-        
+
         print("\n" + "="*60)
         print("  🔍 ALL GROUPS")
         print("="*60)
-        
+
         line = next_line
         while line != "BROWSE_GROUPS_END":
             if "|" in line:
@@ -300,36 +306,38 @@ class ReadThread(threading.Thread):
                     print(f"{group_id}. {name} ({members} members) - {status}")
                     print(f"   {desc}")
             line = self.reader.readline().strip()
-        
+
         print("="*60)
         print("Enter 'join:GROUP_ID' to join, GROUP_ID to open, or 'back' for main menu:")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
 
     def display_create_group_prompt(self):
         """Display create group prompt"""
+        self.client.set_in_contact_selection(False)  # Disable number conversion
         print("\n" + "="*60)
         print("  ➕ CREATE NEW GROUP")
         print("="*60)
         print("Enter group name (or 'back' to cancel):")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
-        
+
         # Server will wait for name, then description
         # After we get the name response, we need to prompt for description
         # But this will be handled by the next message from server
 
     def display_group_chat_header(self, group_name):
         """Display group chat header and history"""
+        self.client.set_in_contact_selection(False)  # Disable number conversion in group chat
         print("\n" + "="*60)
         print(f"  👥 GROUP: {group_name}")
         print("="*60)
-        
+
         # Display history
         while True:
             line = self.reader.readline().strip()
             if line == "GROUP_CHAT_READY":
                 break
             print(line)
-        
+
         print("="*60)
         print("Commands: 'back' (return), '/members' (show members), '/leave' (leave group)")
         print(f"[{self.client.get_user_name()}]: ", end='', flush=True)
